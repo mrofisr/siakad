@@ -652,6 +652,7 @@ function handle_kelas(): string {
         db()->prepare("DELETE FROM kelas WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'Kelas dihapus.'); redirect('?page=kelas');
     }
+}
 
 function handle_krs(): string {
     $u = current_user();
@@ -706,6 +707,7 @@ function handle_krs_mhs(array $u): string {
         }
         redirect('?page=krs');
     }
+}
 
 function handle_krs_admin(): string {
     $ta_id = $_GET['ta_id'] ?? db()->query("SELECT id FROM tahun_akademik WHERE is_active=1 LIMIT 1")->fetchColumn();
@@ -782,6 +784,7 @@ function handle_nilai(): string {
         }
         flash_set('success', 'Nilai tersimpan.'); redirect('?page=nilai&kelas_id=' . $kelas_id);
     }
+}
 
 function handle_presensi(): string {
     require_role('admin', 'dosen');
@@ -834,6 +837,7 @@ function handle_presensi(): string {
         flash_set('success', "Presensi $tanggal tersimpan.");
         redirect("?page=presensi&kelas_id=$kelas_id&tanggal=$tanggal");
     }
+}
 
 function handle_khs(): string {
     $u = current_user();
