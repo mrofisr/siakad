@@ -148,6 +148,7 @@ function do_login(string $username, string $password): ?string {
         'id' => $u['id'], 'username' => $u['username'],
         'role' => $u['role'], 'linked_id' => $u['linked_id'], 'name' => $name,
     ];
+    session_regenerate_id(true);
     return $u['role'];
 }
 
@@ -182,6 +183,11 @@ function textarea(string $name, string $label, string $value = '', bool $req = f
     return "<label>$label<textarea name=\"$name\"$r>$v</textarea></label>";
 }
 function select_opts(string $table, string $label, int|string|null $sel = null, string $where = '', string $order = ''): string {
+    $allowed_tables = ['prodi', 'mahasiswa', 'dosen', 'mata_kuliah', 'tahun_akademik'];
+    $allowed_labels = ['nama', 'kode', 'jenjang', 'nidn', 'nim'];
+    if (!in_array($table, $allowed_tables) || !in_array($label, $allowed_labels)) {
+        die('Invalid table or column reference.');
+    }
     $sql = "SELECT id, $label FROM $table";
     if ($where) $sql .= " WHERE $where";
     if ($order) $sql .= " ORDER BY $order"; else $sql .= " ORDER BY $label";
@@ -330,6 +336,9 @@ function handle_prodi(): string {
     }
     $action = $_GET['action'] ?? 'list';
     if ($action === 'delete') {
+        if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+            die('CSRF token tidak valid.');
+        }
         db()->prepare("DELETE FROM prodi WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'Prodi dihapus.'); redirect('?page=prodi');
     }
@@ -354,7 +363,7 @@ function handle_prodi(): string {
     <a href="?page=prodi&action=create" role="button" style="float:right">+ Tambah</a>
     <table><thead><tr><th>Kode</th><th>Nama</th><th>Jenjang</th><th>Aksi</th></tr></thead><tbody>
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['kode'])?></td><td><?=e($r['nama'])?></td><td><?=e($r['jenjang'])?></td>
-    <td><a href="?page=prodi&action=edit&id=<?=$r['id']?>">Edit</a> | <a href="?page=prodi&action=delete&id=<?=$r['id']?>" onclick="return confirm('Hapus?')">Hapus</a></td></tr>
+    <td><a href="?page=prodi&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="prodi"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
     <?php return ob_get_clean();
 }
@@ -368,6 +377,9 @@ function handle_mahasiswa(): string {
     }
     $action = $_GET['action'] ?? 'list';
     if ($action === 'delete') {
+        if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+            die('CSRF token tidak valid.');
+        }
         db()->prepare("DELETE FROM mahasiswa WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'Mahasiswa dihapus.'); redirect('?page=mahasiswa');
     }
@@ -396,7 +408,7 @@ function handle_mahasiswa(): string {
     <a href="?page=mahasiswa&action=create" role="button" style="float:right">+ Tambah</a>
     <table><thead><tr><th>NIM</th><th>Nama</th><th>Prodi</th><th>Angkatan</th><th>Aksi</th></tr></thead><tbody>
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['nim'])?></td><td><?=e($r['nama'])?></td><td><?=e($r['prodi_nama']??'')?></td><td><?=e($r['angkatan'])?></td>
-    <td><a href="?page=mahasiswa&action=edit&id=<?=$r['id']?>">Edit</a> | <a href="?page=mahasiswa&action=delete&id=<?=$r['id']?>" onclick="return confirm('Hapus?')">Hapus</a></td></tr>
+    <td><a href="?page=mahasiswa&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="mahasiswa"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
     <?php return ob_get_clean();
 }
@@ -410,6 +422,9 @@ function handle_dosen(): string {
     }
     $action = $_GET['action'] ?? 'list';
     if ($action === 'delete') {
+        if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+            die('CSRF token tidak valid.');
+        }
         db()->prepare("DELETE FROM dosen WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'Dosen dihapus.'); redirect('?page=dosen');
     }
@@ -437,7 +452,7 @@ function handle_dosen(): string {
     <a href="?page=dosen&action=create" role="button" style="float:right">+ Tambah</a>
     <table><thead><tr><th>NIDN</th><th>Nama</th><th>Prodi</th><th>Aksi</th></tr></thead><tbody>
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['nidn'])?></td><td><?=e($r['nama'])?></td><td><?=e($r['prodi_nama']??'')?></td>
-    <td><a href="?page=dosen&action=edit&id=<?=$r['id']?>">Edit</a> | <a href="?page=dosen&action=delete&id=<?=$r['id']?>" onclick="return confirm('Hapus?')">Hapus</a></td></tr>
+    <td><a href="?page=dosen&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="dosen"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
     <?php return ob_get_clean();
 }
@@ -451,6 +466,9 @@ function handle_mata_kuliah(): string {
     }
     $action = $_GET['action'] ?? 'list';
     if ($action === 'delete') {
+        if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+            die('CSRF token tidak valid.');
+        }
         db()->prepare("DELETE FROM mata_kuliah WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'MK dihapus.'); redirect('?page=mata_kuliah');
     }
@@ -477,7 +495,7 @@ function handle_mata_kuliah(): string {
     <a href="?page=mata_kuliah&action=create" role="button" style="float:right">+ Tambah</a>
     <table><thead><tr><th>Kode</th><th>Nama</th><th>SKS</th><th>Prodi</th><th>Smstr</th><th>Aksi</th></tr></thead><tbody>
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['kode'])?></td><td><?=e($r['nama'])?></td><td><?=$r['sks']?></td><td><?=e($r['prodi_nama']??'')?></td><td><?=$r['semester']?></td>
-    <td><a href="?page=mata_kuliah&action=edit&id=<?=$r['id']?>">Edit</a> | <a href="?page=mata_kuliah&action=delete&id=<?=$r['id']?>" onclick="return confirm('Hapus?')">Hapus</a></td></tr>
+    <td><a href="?page=mata_kuliah&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="mata_kuliah"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
     <?php return ob_get_clean();
 }
@@ -487,8 +505,10 @@ function handle_tahun_akademik(): string {
     if (method('POST')) { verify_csrf();
         if (isset($_POST['activate'])) {
             $db = db();
+            $tx = $db->beginTransaction();
             $db->exec("UPDATE tahun_akademik SET is_active=0");
             $db->prepare("UPDATE tahun_akademik SET is_active=1 WHERE id=?")->execute([$_POST['id']]);
+            $db->commit();
             flash_set('success', 'Tahun akademik aktif diubah.'); redirect('?page=tahun_akademik');
         }
         $st = db()->prepare("INSERT OR REPLACE INTO tahun_akademik (id, tahun, semester, is_active) VALUES (?,?,?,?)");
@@ -497,6 +517,9 @@ function handle_tahun_akademik(): string {
     }
     $action = $_GET['action'] ?? 'list';
     if ($action === 'delete') {
+        if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+            die('CSRF token tidak valid.');
+        }
         db()->prepare("DELETE FROM tahun_akademik WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'T.A. dihapus.'); redirect('?page=tahun_akademik');
     }
@@ -523,7 +546,7 @@ function handle_tahun_akademik(): string {
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['tahun'])?></td><td><?=e($r['semester'])?></td>
     <td><?=$r['is_active']?'<mark>Aktif</mark>':'Tidak'?></td>
     <td><a href="?page=tahun_akademik&action=edit&id=<?=$r['id']?>">Edit</a>
-        <?php if (!$r['is_active']): ?> | <a href="?page=tahun_akademik&action=delete&id=<?=$r['id']?>" onclick="return confirm('Hapus?')">Hapus</a><?php endif; ?>
+        <?php if (!$r['is_active']): ?> | <form method="get" style="display:inline"><input type="hidden" name="page" value="tahun_akademik"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form><?php endif; ?>
         <?php if (!$r['is_active']): ?> | <form method="post" style="display:inline"><?=csrf_field()?><input type="hidden" name="id" value="<?=$r['id']?>"><button type="submit" name="activate" value="1" class="outline" style="display:inline;width:auto;padding:0 0.5rem">Aktifkan</button></form><?php endif; ?>
     </td></tr>
     <?php endforeach; ?></tbody></table>
@@ -551,6 +574,9 @@ function handle_kelas(): string {
 
     $action = $_GET['action'] ?? 'list';
     if ($action === 'delete') {
+        if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+            die('CSRF token tidak valid.');
+        }
         db()->prepare("DELETE FROM kelas WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'Kelas dihapus.'); redirect('?page=kelas');
     }
@@ -630,7 +656,7 @@ function handle_kelas(): string {
         $mhs_count = $mhs_st->fetchColumn();
     ?>
     <tr><td><?=e($r['mk_nama'])?> (<?=e($r['mk_kode'])?>)</td><td><?=$r['sks']?></td><td><?=e($r['nama_kelas'])?></td><td><?=e($r['dosen_nama']??'-')?></td><td><?=e($r['tahun'])?> <?=e($r['ta_semester'])?></td><td><?=$jads?:'-'?></td><td><?=$r['kuota']?></td><td><?=$mhs_count?></td>
-    <td><a href="?page=kelas&action=edit&id=<?=$r['id']?>">Edit</a> | <a href="?page=kelas&action=delete&id=<?=$r['id']?>" onclick="return confirm('Hapus?')">Hapus</a></td></tr>
+    <td><a href="?page=kelas&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="kelas"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table></div>
     <?php return ob_get_clean();
 }
@@ -647,6 +673,12 @@ function handle_krs_mhs(array $u): string {
 
     if (method('POST')) { verify_csrf();
         $ta_id = $ta_aktif['id'];
+        $chk = db()->prepare("SELECT id, tahun_akademik_id FROM kelas WHERE id=?");
+        $chk->execute([$_POST['kelas_id']]); $row = $chk->fetch();
+        if (!$row || $row['tahun_akademik_id'] != $ta_id) {
+            flash_set('error', 'Kelas tidak valid atau tidak dalam tahun akademik aktif.');
+            redirect('?page=krs');
+        }
         $st = db()->prepare("INSERT OR IGNORE INTO krs (mahasiswa_id, kelas_id, tahun_akademik_id, status) VALUES (?,?,?,'disetujui')");
         $st->execute([$mhs_id, $_POST['kelas_id'], $ta_id]);
         flash_set('success', 'KRS berhasil didaftarkan.'); redirect('?page=krs');
@@ -722,6 +754,7 @@ function handle_krs_admin(): string {
 }
 
 function handle_nilai(): string {
+    require_role('admin', 'dosen');
     $u = current_user();
     $kelas_id = $_GET['kelas_id'] ?? $_POST['kelas_id'] ?? null;
     if (!$kelas_id) {
@@ -754,8 +787,15 @@ function handle_nilai(): string {
     if (method('POST')) { verify_csrf();
         foreach (($_POST['nilai'] ?? []) as $krs_id => $na) {
             if ($na === '') continue;
+            $na = (float)$na;
+            if ($na < 0 || $na > 100) continue;
+            if ($u['role'] === 'dosen') {
+                $chk = db()->prepare("SELECT kelas_id FROM krs WHERE id=?");
+                $chk->execute([$krs_id]); $row = $chk->fetch();
+                if (!$row || $row['kelas_id'] != $kelas_id) continue;
+            }
             $st = db()->prepare("INSERT OR REPLACE INTO nilai (krs_id, nilai_angka) VALUES (?, ?)");
-            $st->execute([$krs_id, (float)$na]);
+            $st->execute([$krs_id, $na]);
         }
         flash_set('success', 'Nilai tersimpan.'); redirect('?page=nilai&kelas_id=' . $kelas_id);
     }
@@ -795,6 +835,7 @@ function handle_nilai(): string {
 }
 
 function handle_presensi(): string {
+    require_role('admin', 'dosen');
     $u = current_user();
     $kelas_id = $_GET['kelas_id'] ?? $_POST['kelas_id'] ?? null;
     $tanggal = $_GET['tanggal'] ?? $_POST['tanggal'] ?? date('Y-m-d');
@@ -830,9 +871,12 @@ function handle_presensi(): string {
         $tanggal = $_POST['tanggal'];
         $st = db()->prepare("INSERT OR REPLACE INTO presensi (kelas_id, mahasiswa_id, tanggal, status) VALUES (?,?,?,?)");
         foreach (($_POST['status'] ?? []) as $mhs_id => $status) {
-            if (in_array($status, ['hadir','sakit','izin','alpha'])) {
-                $st->execute([$kelas_id, $mhs_id, $tanggal, $status]);
+            if (!in_array($status, ['hadir','sakit','izin','alpha'])) continue;
+            if ($u['role'] === 'dosen') {
+                $chk = db()->prepare("SELECT id FROM krs WHERE kelas_id=? AND mahasiswa_id=?");
+                $chk->execute([$kelas_id, $mhs_id]); if (!$chk->fetch()) continue;
             }
+            $st->execute([$kelas_id, $mhs_id, $tanggal, $status]);
         }
         flash_set('success', "Presensi $tanggal tersimpan.");
         redirect("?page=presensi&kelas_id=$kelas_id&tanggal=$tanggal");
