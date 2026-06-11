@@ -1,0 +1,21 @@
+# Database (runtime data)
+siakad.db
+siakad.db-shm
+siakad.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# OpenSpec local state (if any)
+.openspec/local/
+
+# Serena local project config
+.serena/
