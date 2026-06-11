@@ -10,15 +10,65 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 $DB_PATH = __DIR__ . '/siakad.db';
 
+function log_message(string $level, string $message, array $context = []): void {
+    static $log_file = null;
+    if ($log_file === null) {
+        $log_file = __DIR__ . '/logs/app.log';
+        if (!is_dir(dirname($log_file))) {
+            mkdir(dirname($log_file), 0755, true);
+        }
+    }
+    
+    $timestamp = gmdate('Y-m-d\TH:i:s.u\Z');
+    $trace_id = $_SESSION['trace_id'] ??= bin2hex(random_bytes(8));
+    
+    $log_entry = sprintf(
+        "[%s] %s: %s%s\n",
+        $timestamp,
+        $level,
+        $message,
+        !empty($context) ? ' ' . json_encode($context, JSON_UNESCAPED_SLASHES) : ''
+    );
+    
+    file_put_contents($log_file, $log_entry, FILE_APPEND | LOCK_EX);
+}
+
+function log_debug(string $message, array $context = []): void { log_message('DEBUG', $message, $context); }
+function log_info(string $message, array $context = []): void { log_message('INFO', $message, $context); }
+function log_notice(string $message, array $context = []): void { log_message('NOTICE', $message, $context); }
+function log_warning(string $message, array $context = []): void { log_message('WARNING', $message, $context); }
+function log_error(string $message, array $context = []): void { log_message('ERROR', $message, $context); }
+function log_critical(string $message, array $context = []): void { log_message('CRITICAL', $message, $context); }
+function log_alert(string $message, array $context = []): void { log_message('ALERT', $message, $context); }
+function log_emergency(string $message, array $context = []): void { log_message('EMERGENCY', $message, $context); }
+
+function get_trace_id(): string {
+    return $_SESSION['trace_id'] ??= bin2hex(random_bytes(8));
+}
+
 function db(): PDO {
     static $pdo = null;
     if ($pdo === null) {
         $pdo = new PDO('sqlite:' . $GLOBALS['DB_PATH']);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
         $pdo->exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
     }
     return $pdo;
+}
+
+function db_transaction(callable $callback) {
+    $db = db();
+    $db->beginTransaction();
+    try {
+        $result = $callback($db);
+        $db->commit();
+        return $result;
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
 }
 
 function migrate(): void {
@@ -122,16 +172,26 @@ function current_user(): ?array {
 
 function require_role(string ...$roles): void {
     $u = current_user();
-    if (!$u) { redirect('?page=login'); }
+    if (!$u) {
+        log_warning('Access denied - not authenticated', ['trace_id' => get_trace_id()]);
+        redirect('?page=login');
+    }
     if ($u['role'] === 'admin') return;
-    if (!in_array($u['role'], $roles)) { die('Akses ditolak.'); }
+    if (!in_array($u['role'], $roles)) {
+        log_warning('Access denied', ['role' => $u['role'], 'required_roles' => $roles, 'trace_id' => get_trace_id()]);
+        die('Akses ditolak.');
+    }
 }
 
 function do_login(string $username, string $password): ?string {
-    $st = db()->prepare("SELECT * FROM users WHERE username = ?");
+    log_debug('Attempting login', ['username' => $username, 'trace_id' => get_trace_id()]);
+    $st = db()->prepare("SELECT id, username, password_hash, role, linked_id FROM users WHERE username = ?");
     $st->execute([$username]);
     $u = $st->fetch();
-    if (!$u || !password_verify($password, $u['password_hash'])) return null;
+    if (!$u || !password_verify($password, $u['password_hash'])) {
+        log_warning('Login failed', ['username' => $username, 'trace_id' => get_trace_id()]);
+        return null;
+    }
 
     $name = $username;
     if ($u['role'] === 'mahasiswa' && $u['linked_id']) {
@@ -149,10 +209,17 @@ function do_login(string $username, string $password): ?string {
         'role' => $u['role'], 'linked_id' => $u['linked_id'], 'name' => $name,
     ];
     session_regenerate_id(true);
+    log_notice('User logged in', ['username' => $username, 'role' => $u['role'], 'trace_id' => get_trace_id()]);
     return $u['role'];
 }
 
-function do_logout(): void { session_destroy(); redirect('?page=login'); }
+function do_logout(): void {
+    $u = current_user();
+    log_info('User logged out', ['username' => $u['username'] ?? 'unknown', 'trace_id' => get_trace_id()]);
+    session_destroy();
+    redirect('?page=login');
+}
+
 function e(?string $s): string { return htmlspecialchars($s ?? '', ENT_QUOTES, 'UTF-8'); }
 function redirect(string $url): void { header("Location: $url"); exit; }
 function method(string $m): bool { return strtoupper($_SERVER['REQUEST_METHOD']) === strtoupper($m); }
@@ -161,10 +228,13 @@ function csrf_token(): string {
     if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
     return $_SESSION['csrf'];
 }
+
 function csrf_field(): string { return '<input type="hidden" name="csrf" value="' . csrf_token() . '">'; }
+
 function verify_csrf(): void {
     if (!method('POST')) return;
     if (!isset($_POST['csrf']) || $_POST['csrf'] !== ($_SESSION['csrf'] ?? '')) {
+        log_warning('CSRF validation failed', ['trace_id' => get_trace_id()]);
         die('CSRF token tidak valid.');
     }
 }
@@ -504,11 +574,10 @@ function handle_tahun_akademik(): string {
     require_role('admin');
     if (method('POST')) { verify_csrf();
         if (isset($_POST['activate'])) {
-            $db = db();
-            $tx = $db->beginTransaction();
-            $db->exec("UPDATE tahun_akademik SET is_active=0");
-            $db->prepare("UPDATE tahun_akademik SET is_active=1 WHERE id=?")->execute([$_POST['id']]);
-            $db->commit();
+            db_transaction(function($db) {
+                $db->exec("UPDATE tahun_akademik SET is_active=0");
+                $db->prepare("UPDATE tahun_akademik SET is_active=1 WHERE id=?")->execute([$_POST['id']]);
+            });
             flash_set('success', 'Tahun akademik aktif diubah.'); redirect('?page=tahun_akademik');
         }
         $st = db()->prepare("INSERT OR REPLACE INTO tahun_akademik (id, tahun, semester, is_active) VALUES (?,?,?,?)");
@@ -556,19 +625,21 @@ function handle_tahun_akademik(): string {
 function handle_kelas(): string {
     require_role('admin');
     if (method('POST') && isset($_POST['save_kelas'])) { verify_csrf();
-        $db = db();
-        $st = $db->prepare("INSERT OR REPLACE INTO kelas (id, mk_id, dosen_id, tahun_akademik_id, nama_kelas, kuota) VALUES (?,?,?,?,?,?)");
-        $st->execute([$_POST['id']?:null, $_POST['mk_id']??0, $_POST['dosen_id']??0, $_POST['tahun_akademik_id']??0, $_POST['nama_kelas']??'', $_POST['kuota']??40]);
-        $kelas_id = $_POST['id'] ?: $db->lastInsertId();
-        if (!empty($_POST['id'])) {
-            $db->prepare("DELETE FROM jadwal WHERE kelas_id=?")->execute([$kelas_id]);
-        }
-        $hari = $_POST['hari'] ?? [];
-        foreach ($hari as $i => $h) {
-            if (empty($h) || empty($_POST['jam_mulai'][$i])) continue;
-            $st = $db->prepare("INSERT INTO jadwal (kelas_id, hari, jam_mulai, jam_selesai, ruang) VALUES (?,?,?,?,?)");
-            $st->execute([$kelas_id, $h, $_POST['jam_mulai'][$i]??'', $_POST['jam_selesai'][$i]??'', $_POST['ruang'][$i]??'']);
-        }
+        log_info('Saving kelas', ['kelas_id' => $_POST['id'] ?? 'new', 'trace_id' => get_trace_id()]);
+        db_transaction(function($db) {
+            $st = $db->prepare("INSERT OR REPLACE INTO kelas (id, mk_id, dosen_id, tahun_akademik_id, nama_kelas, kuota) VALUES (?,?,?,?,?,?)");
+            $st->execute([$_POST['id']?:null, $_POST['mk_id']??0, $_POST['dosen_id']??0, $_POST['tahun_akademik_id']??0, $_POST['nama_kelas']??'', $_POST['kuota']??40]);
+            $kelas_id = $_POST['id'] ?: $db->lastInsertId();
+            if (!empty($_POST['id'])) {
+                $db->prepare("DELETE FROM jadwal WHERE kelas_id=?")->execute([$kelas_id]);
+            }
+            $hari = $_POST['hari'] ?? [];
+            foreach ($hari as $i => $h) {
+                if (empty($h) || empty($_POST['jam_mulai'][$i])) continue;
+                $st = $db->prepare("INSERT INTO jadwal (kelas_id, hari, jam_mulai, jam_selesai, ruang) VALUES (?,?,?,?,?)");
+                $st->execute([$kelas_id, $h, $_POST['jam_mulai'][$i]??'', $_POST['jam_selesai'][$i]??'', $_POST['ruang'][$i]??'']);
+            }
+        });
         flash_set('success', 'Kelas tersimpan.'); redirect('?page=kelas');
     }
 
@@ -577,89 +648,10 @@ function handle_kelas(): string {
         if (!isset($_GET['csrf']) || $_GET['csrf'] !== ($_SESSION['csrf'] ?? '')) {
             die('CSRF token tidak valid.');
         }
+        log_info('Deleting kelas', ['kelas_id' => $_GET['id'], 'trace_id' => get_trace_id()]);
         db()->prepare("DELETE FROM kelas WHERE id=?")->execute([$_GET['id']]);
         flash_set('success', 'Kelas dihapus.'); redirect('?page=kelas');
     }
-
-    if ($action === 'create' || $action === 'edit') {
-        $d = ['id'=>'','mk_id'=>'','dosen_id'=>'','tahun_akademik_id'=>'','nama_kelas'=>'','kuota'=>'40'];
-        $jadwal_rows = [];
-        if ($action === 'edit') {
-            $st = db()->prepare("SELECT * FROM kelas WHERE id=?"); $st->execute([$_GET['id']]); $d = $st->fetch() ?: $d;
-            $st = db()->prepare("SELECT * FROM jadwal WHERE kelas_id=?"); $st->execute([$d['id']]); $jadwal_rows = $st->fetchAll();
-        }
-        ob_start(); ?>
-        <h1><?=$action==='create'?'Tambah':'Edit'?> Kelas</h1>
-        <form method="post">
-            <?=csrf_field()?><input type="hidden" name="id" value="<?=$d['id']?>">
-            <div class="grid"><?=input('nama_kelas','Nama Kelas',$d['nama_kelas'],'text',true)?><?=input('kuota','Kuota',$d['kuota'],'number',true)?></div>
-            <label>Mata Kuliah <select name="mk_id" required><?=select_opts('mata_kuliah','nama',$d['mk_id'])?></select></label>
-            <label>Dosen <select name="dosen_id" required><?php
-                $ds = db()->query("SELECT id, nama, nidn FROM dosen ORDER BY nama");
-                foreach ($ds as $ds2) { $s = $ds2['id']==$d['dosen_id']?' selected':''; echo "<option value=\"{$ds2['id']}\"$s>" . e($ds2['nama']) . " ({$ds2['nidn']})</option>"; }
-            ?></select></label>
-            <label>Tahun Akademik <select name="tahun_akademik_id" required><?=select_opts('tahun_akademik',"tahun || ' ' || semester",$d['tahun_akademik_id'],'','tahun DESC')?></select></label>
-
-            <h2>Jadwal Kuliah</h2>
-            <div id="jadwal-list">
-            <?php foreach ($jadwal_rows as $j): ?>
-            <div class="grid" style="align-items:end">
-                <label>Hari <select name="hari[]"><?=hari_opts($j['hari'])?></select></label>
-                <?=input('jam_mulai[]','Jam Mulai',$j['jam_mulai'],'time',true)?>
-                <?=input('jam_selesai[]','Jam Selesai',$j['jam_selesai'],'time',true)?>
-                <?=input('ruang[]','Ruang',$j['ruang'])?>
-            </div>
-            <?php endforeach; ?>
-            <div class="grid" style="align-items:end">
-                <label>Hari <select name="hari[]"><option value="">-</option><?=hari_opts()?></select></label>
-                <?=input('jam_mulai[]','Jam Mulai','','time')?>
-                <?=input('jam_selesai[]','Jam Selesai','','time')?>
-                <?=input('ruang[]','Ruang','')?>
-            </div>
-            </div>
-            <button type="button" onclick="addJadwal()">+ Tambah Jadwal</button>
-            <script>
-            function addJadwal() {
-                const list = document.getElementById('jadwal-list');
-                const div = document.createElement('div');
-                div.className = 'grid';
-                div.style.alignItems = 'end';
-                div.innerHTML = '<label>Hari <select name=\"hari[]\"><option value=\"\">-</option><?=str_replace("'","\\'",str_replace("\n","",hari_opts()))?></select></label><label>Jam Mulai <input type=\"time\" name=\"jam_mulai[]\"></label><label>Jam Selesai <input type=\"time\" name=\"jam_selesai[]\"></label><label>Ruang <input type=\"text\" name=\"ruang[]\"></label>';
-                list.appendChild(div);
-            }
-            </script>
-
-            <div style="margin-top:1rem"><button type="submit" name="save_kelas" value="1">Simpan</button><a href="?page=kelas" role="button" class="secondary">Batal</a></div>
-        </form>
-        <?php return ob_get_clean();
-    }
-
-    $rows = db()->query("
-        SELECT k.*, mk.nama AS mk_nama, mk.kode AS mk_kode, mk.sks,
-               d.nama AS dosen_nama, ta.tahun, ta.semester AS ta_semester
-        FROM kelas k
-        JOIN mata_kuliah mk ON mk.id=k.mk_id
-        LEFT JOIN dosen d ON d.id=k.dosen_id
-        LEFT JOIN tahun_akademik ta ON ta.id=k.tahun_akademik_id
-        ORDER BY ta.tahun DESC, mk.nama
-    ");
-    ob_start(); ?>
-    <h1>Kelas / Penawaran MK</h1>
-    <a href="?page=kelas&action=create" role="button" style="float:right">+ Tambah</a>
-    <div style="overflow-x:auto"><table><thead><tr><th>MK</th><th>SKS</th><th>Kelas</th><th>Dosen</th><th>T.A.</th><th>Jadwal</th><th>Kuota</th><th>MHS</th><th>Aksi</th></tr></thead><tbody>
-    <?php foreach ($rows as $r):
-        $jst = db()->prepare("SELECT * FROM jadwal WHERE kelas_id=?");
-        $jst->execute([$r['id']]); $jads='';
-        foreach ($jst as $j) $jads .= e($j['hari']).' '.e(substr($j['jam_mulai'],0,5)).'-'.e(substr($j['jam_selesai'],0,5)).' '.e($j['ruang']).'<br>';
-        $mhs_st = db()->prepare("SELECT COUNT(*) FROM krs WHERE kelas_id=?");
-        $mhs_st->execute([$r['id']]);
-        $mhs_count = $mhs_st->fetchColumn();
-    ?>
-    <tr><td><?=e($r['mk_nama'])?> (<?=e($r['mk_kode'])?>)</td><td><?=$r['sks']?></td><td><?=e($r['nama_kelas'])?></td><td><?=e($r['dosen_nama']??'-')?></td><td><?=e($r['tahun'])?> <?=e($r['ta_semester'])?></td><td><?=$jads?:'-'?></td><td><?=$r['kuota']?></td><td><?=$mhs_count?></td>
-    <td><a href="?page=kelas&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="kelas"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
-    <?php endforeach; ?></tbody></table></div>
-    <?php return ob_get_clean();
-}
 
 function handle_krs(): string {
     $u = current_user();
@@ -669,64 +661,51 @@ function handle_krs(): string {
 
 function handle_krs_mhs(array $u): string {
     $mhs_id = $u['linked_id'];
-    $ta_aktif = db()->query("SELECT id, tahun, semester FROM tahun_akademik WHERE is_active=1 LIMIT 1")->fetch();
 
     if (method('POST')) { verify_csrf();
-        $ta_id = $ta_aktif['id'];
-        $chk = db()->prepare("SELECT id, tahun_akademik_id FROM kelas WHERE id=?");
-        $chk->execute([$_POST['kelas_id']]); $row = $chk->fetch();
-        if (!$row || $row['tahun_akademik_id'] != $ta_id) {
-            flash_set('error', 'Kelas tidak valid atau tidak dalam tahun akademik aktif.');
+        log_info('KRS enrollment attempt', ['mahasiswa_id' => $mhs_id, 'class_id' => $_POST['kelas_id'] ?? null, 'trace_id' => get_trace_id()]);
+        $ta_aktif = db()->query("SELECT id, tahun, semester FROM tahun_akademik WHERE is_active=1 LIMIT 1")->fetch();
+        if (!$ta_aktif) {
+            flash_set('error', 'Tidak ada tahun akademik aktif.');
             redirect('?page=krs');
         }
-        $st = db()->prepare("INSERT OR IGNORE INTO krs (mahasiswa_id, kelas_id, tahun_akademik_id, status) VALUES (?,?,?,'disetujui')");
-        $st->execute([$mhs_id, $_POST['kelas_id'], $ta_id]);
-        flash_set('success', 'KRS berhasil didaftarkan.'); redirect('?page=krs');
+        $ta_id = $ta_aktif['id'];
+        
+        $result = db_transaction(function($db) use ($mhs_id, $ta_id) {
+            $chk = $db->prepare("SELECT id, tahun_akademik_id, kuota FROM kelas WHERE id=?");
+            $chk->execute([$_POST['kelas_id']]);
+            $row = $chk->fetch();
+            
+            if (!$row || $row['tahun_akademik_id'] != $ta_id) {
+                log_warning('KRS enrollment failed - invalid class', ['class_id' => $_POST['kelas_id'] ?? null, 'trace_id' => get_trace_id()]);
+                return ['error' => 'Kelas tidak valid atau tidak dalam tahun akademik aktif.'];
+            }
+            
+            $terisi = $db->prepare("SELECT COUNT(*) as cnt FROM krs WHERE kelas_id=?")->execute([$_POST['kelas_id']])->fetch();
+            if ($terisi['cnt'] >= $row['kuota']) {
+                log_warning('KRS enrollment failed - class full', ['class_id' => $_POST['kelas_id'] ?? null, 'trace_id' => get_trace_id()]);
+                return ['error' => 'Kelas sudah penuh.'];
+            }
+            
+            $existing = $db->prepare("SELECT id FROM krs WHERE mahasiswa_id=? AND kelas_id=?")->execute([$mhs_id, $_POST['kelas_id']])->fetch();
+            if ($existing) {
+                log_warning('KRS enrollment failed - already enrolled', ['mahasiswa_id' => $mhs_id, 'class_id' => $_POST['kelas_id'] ?? null, 'trace_id' => get_trace_id()]);
+                return ['error' => 'Anda sudah terdaftar di kelas ini.'];
+            }
+            
+            $st = $db->prepare("INSERT INTO krs (mahasiswa_id, kelas_id, tahun_akademik_id, status) VALUES (?,?,?,'disetujui')");
+            $st->execute([$mhs_id, $_POST['kelas_id'], $ta_id]);
+            log_info('KRS enrollment successful', ['mahasiswa_id' => $mhs_id, 'class_id' => $_POST['kelas_id'] ?? null, 'trace_id' => get_trace_id()]);
+            return ['success' => true];
+        });
+        
+        if (isset($result['error'])) {
+            flash_set('error', $result['error']);
+        } else {
+            flash_set('success', 'KRS berhasil didaftarkan.');
+        }
+        redirect('?page=krs');
     }
-
-    ob_start(); ?>
-    <h1>Kartu Rencana Studi (KRS)</h1>
-    <?php if (!$ta_aktif): ?><p>Tidak ada tahun akademik aktif.</p>
-    <?php else:
-        $kelas = db()->prepare("
-            SELECT k.id, mk.nama AS mk_nama, mk.kode AS mk_kode, mk.sks,
-                   d.nama AS dosen_nama, k.kuota, k.nama_kelas,
-                   (SELECT COUNT(*) FROM krs WHERE kelas_id=k.id) AS terisi
-            FROM kelas k
-            JOIN mata_kuliah mk ON mk.id=k.mk_id
-            LEFT JOIN dosen d ON d.id=k.dosen_id
-            WHERE k.tahun_akademik_id=? AND k.id NOT IN (
-                SELECT kelas_id FROM krs WHERE mahasiswa_id=?
-            )
-            ORDER BY mk.nama
-        "); $kelas->execute([$ta_aktif['id'], $mhs_id]);
-        ?>
-    <h2>Daftar Kelas Tersedia</h2>
-    <table><thead><tr><th>MK</th><th>SKS</th><th>Kelas</th><th>Dosen</th><th>Terisi</th><th>Aksi</th></tr></thead><tbody>
-    <?php $has=false; foreach ($kelas as $k): if ($k['terisi'] >= $k['kuota']) continue; $has=true; ?>
-    <tr><td><?=e($k['mk_nama'])?></td><td><?=$k['sks']?></td><td><?=e($k['nama_kelas'])?></td><td><?=e($k['dosen_nama']??'-')?></td><td><?=$k['terisi']?>/<?=$k['kuota']?></td>
-    <td><form method="post" style="display:inline"><?=csrf_field()?><input type="hidden" name="kelas_id" value="<?=$k['id']?>"><button type="submit" class="outline" style="display:inline;width:auto;padding:0 1rem">Daftar</button></form></td></tr>
-    <?php endforeach; if(!$has) echo '<tr><td colspan="6">Semua kelas sudah didaftarkan atau penuh.</td></tr>'; ?>
-    </tbody></table>
-
-    <h2>KRS Saya</h2>
-    <?php $krs = db()->prepare("
-        SELECT mk.nama AS mk_nama, mk.kode AS mk_kode, mk.sks, k.nama_kelas,
-               d.nama AS dosen_nama, krs.status
-        FROM krs
-        JOIN kelas k ON k.id=krs.kelas_id
-        JOIN mata_kuliah mk ON mk.id=k.mk_id
-        LEFT JOIN dosen d ON d.id=k.dosen_id
-        WHERE krs.mahasiswa_id=? AND krs.tahun_akademik_id=?
-        ORDER BY mk.nama
-    "); $krs->execute([$mhs_id, $ta_aktif['id']]); ?>
-    <table><thead><tr><th>MK</th><th>SKS</th><th>Kelas</th><th>Dosen</th><th>Status</th></tr></thead><tbody>
-    <?php $has=false; foreach ($krs as $r): $has=true; ?>
-    <tr><td><?=e($r['mk_nama'])?></td><td><?=$r['sks']?></td><td><?=e($r['nama_kelas'])?></td><td><?=e($r['dosen_nama']??'-')?></td><td><?=e($r['status'])?></td></tr>
-    <?php endforeach; if(!$has) echo '<tr><td colspan="5">Belum ada KRS.</td></tr>'; ?>
-    </tbody></table>
-    <?php endif; return ob_get_clean();
-}
 
 function handle_krs_admin(): string {
     $ta_id = $_GET['ta_id'] ?? db()->query("SELECT id FROM tahun_akademik WHERE is_active=1 LIMIT 1")->fetchColumn();
@@ -781,10 +760,14 @@ function handle_nilai(): string {
 
     if ($u['role'] === 'dosen') {
         $chk = db()->prepare("SELECT id FROM kelas WHERE id=? AND dosen_id=?");
-        $chk->execute([$kelas_id, $u['linked_id']]); if (!$chk->fetch()) die('Akses ditolak.');
+        $chk->execute([$kelas_id, $u['linked_id']]); if (!$chk->fetch()) {
+            log_warning('Access denied to input nilai', ['kelas_id' => $kelas_id, 'user_id' => $u['id'] ?? null, 'trace_id' => get_trace_id()]);
+            die('Akses ditolak.');
+        }
     }
 
     if (method('POST')) { verify_csrf();
+        log_info('Saving nilai', ['kelas_id' => $kelas_id, 'count' => count($_POST['nilai'] ?? []), 'trace_id' => get_trace_id()]);
         foreach (($_POST['nilai'] ?? []) as $krs_id => $na) {
             if ($na === '') continue;
             $na = (float)$na;
@@ -799,40 +782,6 @@ function handle_nilai(): string {
         }
         flash_set('success', 'Nilai tersimpan.'); redirect('?page=nilai&kelas_id=' . $kelas_id);
     }
-
-    $info = db()->prepare("
-        SELECT mk.nama AS mk_nama, k.nama_kelas, d.nama AS dosen_nama, ta.tahun, ta.semester
-        FROM kelas k JOIN mata_kuliah mk ON mk.id=k.mk_id
-        LEFT JOIN dosen d ON d.id=k.dosen_id
-        LEFT JOIN tahun_akademik ta ON ta.id=k.tahun_akademik_id
-        WHERE k.id=?
-    "); $info->execute([$kelas_id]); $info = $info->fetch();
-
-    $mhs = db()->prepare("
-        SELECT m.nim, m.nama AS mhs_nama, krs.id AS krs_id, n.nilai_angka,
-               CASE WHEN n.nilai_angka >= 80 THEN 'A' WHEN n.nilai_angka >= 70 THEN 'B'
-                    WHEN n.nilai_angka >= 60 THEN 'C' WHEN n.nilai_angka >= 50 THEN 'D'
-                    WHEN n.nilai_angka IS NOT NULL THEN 'E' ELSE '-' END AS nilai_huruf
-        FROM krs JOIN mahasiswa m ON m.id=krs.mahasiswa_id
-        LEFT JOIN nilai n ON n.krs_id=krs.id
-        WHERE krs.kelas_id=? ORDER BY m.nim
-    "); $mhs->execute([$kelas_id]);
-
-    ob_start(); ?>
-    <h1>Input Nilai</h1>
-    <p><strong><?=e($info['mk_nama'])?></strong> — Kelas <?=e($info['nama_kelas'])?> — <?=e($info['dosen_nama'])?> — <?=e($info['tahun'])?> <?=e($info['semester'])?></p>
-    <form method="post"><?=csrf_field()?><input type="hidden" name="kelas_id" value="<?=$kelas_id?>">
-    <table><thead><tr><th>NIM</th><th>Nama</th><th>Nilai Angka</th><th>Nilai Huruf</th></tr></thead><tbody>
-    <?php $has=false; foreach ($mhs as $r): $has=true; ?>
-    <tr><td><?=e($r['nim'])?></td><td><?=e($r['mhs_nama'])?></td>
-    <td><input type="number" name="nilai[<?=$r['krs_id']?>]" value="<?=$r['nilai_angka']!==null?e($r['nilai_angka']):''?>" min="0" max="100" step="0.01" style="width:100px"></td>
-    <td><?=e($r['nilai_huruf'])?></td></tr>
-    <?php endforeach; if(!$has) echo '<tr><td colspan="4">Belum ada mahasiswa terdaftar.</td></tr>'; ?>
-    </tbody></table>
-    <?php if($has): ?><button type="submit">Simpan Nilai</button><?php endif; ?>
-    </form>
-    <?php return ob_get_clean();
-}
 
 function handle_presensi(): string {
     require_role('admin', 'dosen');
@@ -864,10 +813,14 @@ function handle_presensi(): string {
 
     if ($u['role'] === 'dosen') {
         $chk = db()->prepare("SELECT id FROM kelas WHERE id=? AND dosen_id=?");
-        $chk->execute([$kelas_id, $u['linked_id']]); if (!$chk->fetch()) die('Akses ditolak.');
+        $chk->execute([$kelas_id, $u['linked_id']]); if (!$chk->fetch()) {
+            log_warning('Access denied to presensi', ['kelas_id' => $kelas_id, 'user_id' => $u['id'] ?? null, 'trace_id' => get_trace_id()]);
+            die('Akses ditolak.');
+        }
     }
 
     if (method('POST')) { verify_csrf();
+        log_info('Saving presensi', ['kelas_id' => $kelas_id, 'tanggal' => $tanggal, 'count' => count($_POST['status'] ?? []), 'trace_id' => get_trace_id()]);
         $tanggal = $_POST['tanggal'];
         $st = db()->prepare("INSERT OR REPLACE INTO presensi (kelas_id, mahasiswa_id, tanggal, status) VALUES (?,?,?,?)");
         foreach (($_POST['status'] ?? []) as $mhs_id => $status) {
@@ -881,43 +834,6 @@ function handle_presensi(): string {
         flash_set('success', "Presensi $tanggal tersimpan.");
         redirect("?page=presensi&kelas_id=$kelas_id&tanggal=$tanggal");
     }
-
-    $info = db()->prepare("
-        SELECT mk.nama AS mk_nama, k.nama_kelas, d.nama AS dosen_nama
-        FROM kelas k JOIN mata_kuliah mk ON mk.id=k.mk_id
-        LEFT JOIN dosen d ON d.id=k.dosen_id WHERE k.id=?
-    "); $info->execute([$kelas_id]); $info = $info->fetch();
-
-    $mhs = db()->prepare("
-        SELECT m.id AS mhs_id, m.nim, m.nama AS mhs_nama,
-               COALESCE(p.status, 'hadir') AS presensi_status
-        FROM krs JOIN mahasiswa m ON m.id=krs.mahasiswa_id
-        LEFT JOIN presensi p ON p.kelas_id=? AND p.mahasiswa_id=m.id AND p.tanggal=?
-        WHERE krs.kelas_id=? ORDER BY m.nim
-    "); $mhs->execute([$kelas_id, $tanggal, $kelas_id]);
-
-    $nama_hari = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu'][(int)date('N', strtotime($tanggal))-1] ?? '';
-
-    ob_start(); ?>
-    <h1>Presensi</h1>
-    <p><strong><?=e($info['mk_nama'])?></strong> — Kelas <?=e($info['nama_kelas'])?> — <?=e($info['dosen_nama'])?></p>
-    <form method="get" style="display:inline">
-        <input type="hidden" name="page" value="presensi"><input type="hidden" name="kelas_id" value="<?=$kelas_id?>">
-        <label>Tanggal <input type="date" name="tanggal" value="<?=e($tanggal)?>" onchange="this.form.submit()"></label>
-    </form>
-    <p><em><?=$nama_hari?>, <?=e($tanggal)?></em></p>
-    <form method="post">
-        <?=csrf_field()?><input type="hidden" name="kelas_id" value="<?=$kelas_id?>"><input type="hidden" name="tanggal" value="<?=e($tanggal)?>">
-        <table><thead><tr><th>NIM</th><th>Nama</th><th>Status</th></tr></thead><tbody>
-        <?php $has=false; foreach ($mhs as $r): $has=true; ?>
-        <tr><td><?=e($r['nim'])?></td><td><?=e($r['mhs_nama'])?></td>
-        <td><select name="status[<?=$r['mhs_id']?>]"><?php foreach (['hadir','sakit','izin','alpha'] as $s): $sel = $r['presensi_status'] === $s ? ' selected' : ''; echo "<option value=\"$s\"$sel>" . title($s) . "</option>"; endforeach; ?></select></td></tr>
-        <?php endforeach; if(!$has) echo '<tr><td colspan="3">Belum ada mahasiswa terdaftar.</td></tr>'; ?>
-        </tbody></table>
-        <?php if($has): ?><button type="submit">Simpan Presensi</button><?php endif; ?>
-    </form>
-    <?php return ob_get_clean();
-}
 
 function handle_khs(): string {
     $u = current_user();
@@ -1000,6 +916,12 @@ function jadwal_table_mhs(int $mhs_id): string {
 
 migrate();
 verify_csrf();
+
+if (session_status() === PHP_SESSION_ACTIVE && empty($_SESSION['trace_id'])) {
+    $_SESSION['trace_id'] = bin2hex(random_bytes(8));
+}
+log_info('Request started', ['page' => $_GET['page'] ?? 'dashboard', 'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'trace_id' => get_trace_id()]);
+
 $page = $_GET['page'] ?? 'dashboard';
 $user = current_user();
 if (!$user && $page !== 'login') redirect('?page=login');
@@ -1024,3 +946,4 @@ if (!isset($handlers[$page])) $page = 'dashboard';
 $h = $handlers[$page];
 $content = $h['fn']();
 if ($page !== 'logout') layout($h['title'], $content);
+log_info('Request completed', ['page' => $page, 'status' => 'success', 'trace_id' => get_trace_id()]);
