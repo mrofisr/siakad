@@ -927,6 +927,23 @@ if (session_status() === PHP_SESSION_ACTIVE && empty($_SESSION['trace_id'])) {
 log_info('Request started', ['page' => $_GET['page'] ?? 'dashboard', 'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'trace_id' => get_trace_id()]);
 
 $page = $_GET['page'] ?? 'dashboard';
+if ($page === 'ping') {
+    header('Content-Type: text/plain');
+    echo 'pong';
+    exit;
+}
+if ($page === 'health') {
+    header('Content-Type: application/json');
+    try {
+        db()->query("SELECT 1");
+        $status = 'ok';
+    } catch (Exception $e) {
+        $status = 'error';
+    }
+    echo json_encode(['status' => $status, 'database' => $status, 'timestamp' => gmdate('Y-m-d\TH:i:s\Z')]);
+    exit;
+}
+
 $user = current_user();
 if (!$user && $page !== 'login') redirect('?page=login');
 
