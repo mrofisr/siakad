@@ -172,6 +172,15 @@ function migrate(): void {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS landing_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slot_name TEXT UNIQUE NOT NULL,
+            original_filename TEXT,
+            file_size INTEGER,
+            mime_type TEXT,
+            uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE CASCADE
+        );
     ");
 
     $count = $db->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -463,11 +472,8 @@ function layout(string $title, string $content): void {
             $items['nilai'] = 'Nilai';
             $items['presensi'] = 'Presensi';
             $items['khs'] = 'KHS';
-<<<<<<< HEAD
             $items['broadcast'] = 'Broadcast';
-=======
             $items['settings'] = 'Pengaturan';
->>>>>>> 57c0e26 (feat: implement landing page with customizable settings admin panel)
         } elseif ($u['role'] === 'dosen') {
             $items['dashboard'] = 'Dashboard';
             $items['presensi'] = 'Presensi';
@@ -632,6 +638,73 @@ function handle_broadcast(): string {
         <button type="submit">Kirim Broadcast</button>
     </form>
     <?php return ob_get_clean();
+}
+
+function validate_image_magic_bytes(string $file_path, string $extension): bool {
+    $extension = strtolower($extension);
+    $magic_bytes = file_get_contents($file_path, false, null, 0, 12);
+    
+    $signatures = [
+        'jpg' => ["\xFF\xD8\xFF"],
+        'jpeg' => ["\xFF\xD8\xFF"],
+        'png' => ["\x89PNG\r\n\x1a\n"],
+        'gif' => ["\x47\x49\x46\x38"],
+        'webp' => null, // WEBP is complex, checked via fileinfo
+    ];
+    
+    if (!isset($signatures[$extension])) {
+        return false;
+    }
+    
+    if ($extension === 'webp') {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $file_path);
+        finfo_close($finfo);
+        return $mime === 'image/webp';
+    }
+    
+    foreach ($signatures[$extension] as $sig) {
+        if (strpos($magic_bytes, $sig) === 0) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+function validate_image_upload(array $file): array {
+    $errors = [];
+    
+    // File size check (2MB = 2097152 bytes)
+    if ($file['size'] > 2097152) {
+        $errors[] = 'File size exceeds 2MB limit';
+    }
+    
+    // Extension whitelist
+    $allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    
+    if (!in_array($ext, $allowed_extensions)) {
+        $errors[] = 'File type not allowed. Only JPG, PNG, GIF, WebP allowed';
+    }
+    
+    // Verify valid upload before file I/O
+    if (!is_uploaded_file($file['tmp_name'])) {
+        $errors[] = 'Upload error - file is not a valid upload';
+    }
+    
+    // MIME type check
+    $allowed_mimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!in_array($file['type'], $allowed_mimes)) {
+        $errors[] = 'Invalid MIME type';
+    }
+    
+    // Magic bytes validation (only if earlier checks pass)
+    if (empty($errors) && file_exists($file['tmp_name']) && !validate_image_magic_bytes($file['tmp_name'], $ext)) {
+        $errors[] = 'File header does not match extension (possible tampering)';
+    }
+    
+    return $errors;
 }
 
 function handle_login(): string {
@@ -1262,7 +1335,192 @@ function jadwal_table_mhs(int $mhs_id): string {
     <td><?=e($r['mk_nama'])?></td><td><?=$r['sks']?></td><td><?=e($r['nama_kelas'])?></td><td><?=e($r['ruang'])?></td></tr>
     <?php endforeach; if(!$has) echo '<tr><td colspan="6">Belum ada jadwal.</td></tr>'; ?>
     </tbody></table>
-    <?php return ob_get_clean();
+     <?php return ob_get_clean();
+}
+
+function handle_landing_images(): string {
+    require_role('admin');
+    
+    $u = current_user();
+    $upload_dir = __DIR__ . '/uploads/landing';
+    
+    // Ensure upload directory exists
+    if (!is_dir($upload_dir)) {
+        mkdir($upload_dir, 0755, true);
+    }
+    
+    $allowed_slots = ['hero', 'banner', 'logo'];
+    $slot = $_POST['slot'] ?? null;
+    $message = null;
+    $message_type = null;
+    
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        verify_csrf(); // Dies if CSRF is invalid
+        
+        if (!$slot || !in_array($slot, $allowed_slots)) {
+            $message = 'Invalid image slot selected';
+            $message_type = 'error';
+            log_warning('Invalid slot on landing_images upload', ['slot' => $slot, 'user_id' => $u['id'], 'trace_id' => get_trace_id()]);
+        } elseif (!isset($_FILES['image'])) {
+            $message = 'No file provided';
+            $message_type = 'error';
+        } else {
+            $file = $_FILES['image'];
+            $errors = validate_image_upload($file);
+            
+            if (!empty($errors)) {
+                $message = implode(', ', $errors);
+                $message_type = 'error';
+                log_warning('Image upload validation failed', [
+                    'slot' => $slot,
+                    'filename' => $file['name'],
+                    'errors' => $errors,
+                    'user_id' => $u['id'],
+                    'trace_id' => get_trace_id()
+                ]);
+            } else {
+                try {
+                    // Determine file extension from validated upload
+                    $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+                    
+                    // Build target filename (always use slot name + extension)
+                    $target_filename = $slot . '.' . $ext;
+                    $target_path = $upload_dir . '/' . $target_filename;
+                    
+                    // Delete old file if exists
+                    $old_files = glob($upload_dir . '/' . $slot . '.*');
+                    foreach ($old_files as $old_file) {
+                        if (is_file($old_file)) {
+                            unlink($old_file);
+                        }
+                    }
+                    
+                    // Move uploaded file
+                    if (!move_uploaded_file($file['tmp_name'], $target_path)) {
+                        throw new Exception('Failed to move uploaded file');
+                    }
+                    
+                    // Update database record
+                    db_transaction(function ($db) use ($slot, $target_filename, $file, $u) {
+                        $stmt = $db->prepare("
+                            INSERT INTO landing_images (slot_name, original_filename, file_size, mime_type, uploaded_by)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(slot_name) DO UPDATE SET
+                                original_filename = excluded.original_filename,
+                                file_size = excluded.file_size,
+                                mime_type = excluded.mime_type,
+                                uploaded_at = CURRENT_TIMESTAMP,
+                                uploaded_by = excluded.uploaded_by
+                        ");
+                        $stmt->execute([
+                            $slot,
+                            $file['name'],
+                            $file['size'],
+                            $file['type'],
+                            $u['id']
+                        ]);
+                    });
+                    
+                    $message = "Image '{$slot}' uploaded successfully";
+                    $message_type = 'success';
+                    log_info('Landing image uploaded successfully', [
+                        'slot' => $slot,
+                        'filename' => $target_filename,
+                        'size' => $file['size'],
+                        'user_id' => $u['id'],
+                        'trace_id' => get_trace_id()
+                    ]);
+                } catch (Exception $e) {
+                    $message = 'Upload failed: ' . $e->getMessage();
+                    $message_type = 'error';
+                    log_error('Landing image upload exception', [
+                        'slot' => $slot,
+                        'error' => $e->getMessage(),
+                        'user_id' => $u['id'],
+                        'trace_id' => get_trace_id()
+                    ]);
+                }
+            }
+        }
+    }
+    
+    // Get current landing images info
+    $landing_images = [];
+    $stmt = db()->prepare("SELECT slot_name, original_filename, file_size, uploaded_at FROM landing_images ORDER BY uploaded_at DESC");
+    $stmt->execute();
+    foreach ($stmt->fetchAll() as $img) {
+        $landing_images[$img['slot_name']] = $img;
+    }
+    
+    ob_start();
+    ?>
+    <h2>Landing Page Image Upload</h2>
+    
+    <?php if ($message): ?>
+        <div style="padding: 1rem; margin: 1rem 0; border-left: 4px solid <?=$message_type === 'success' ? '#4CAF50' : '#f44336'?>; background: <?=$message_type === 'success' ? '#e8f5e9' : '#ffebee'?>;">
+            <?=e($message)?>
+        </div>
+    <?php endif; ?>
+    
+    <form method="POST" enctype="multipart/form-data" style="max-width: 500px;">
+        <input type="hidden" name="csrf" value="<?=csrf_token()?>">
+        
+        <div style="margin-bottom: 1rem;">
+            <label>Image Slot</label>
+            <select name="slot" required>
+                <option value="">Select slot...</option>
+                <?php foreach ($allowed_slots as $s): ?>
+                    <option value="<?=e($s)?>" <?=$slot === $s ? 'selected' : ''?>>
+                        <?=e(ucfirst($s))?>
+                        <?php if (isset($landing_images[$s])): ?>
+                            (current: <?=e($landing_images[$s]['original_filename'])?>)
+                        <?php endif; ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        
+        <div style="margin-bottom: 1rem;">
+            <label>Image File</label>
+            <input type="file" name="image" accept="image/jpeg,image/png,image/gif,image/webp" required>
+            <small>Max 2MB. Allowed: JPG, PNG, GIF, WebP</small>
+        </div>
+        
+        <button type="submit">Upload Image</button>
+    </form>
+    
+    <hr>
+    <h3>Current Landing Images</h3>
+    
+    <?php if (empty($landing_images)): ?>
+        <p><em>No images uploaded yet.</em></p>
+    <?php else: ?>
+        <table>
+            <thead>
+                <tr>
+                    <th>Slot</th>
+                    <th>Filename</th>
+                    <th>Size</th>
+                    <th>Uploaded</th>
+                    <th>URL</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($landing_images as $slot => $img): ?>
+                    <tr>
+                        <td><?=e(ucfirst($slot))?></td>
+                        <td><?=e($img['original_filename'])?></td>
+                        <td><?=number_format($img['file_size'] / 1024, 2)?> KB</td>
+                        <td><?=e($img['uploaded_at'])?></td>
+                        <td><code>/uploads/landing/<?=e($slot)?>.<?=e(pathinfo($img['original_filename'], PATHINFO_EXTENSION))?></code></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+    
+    <?php
+    return ob_get_clean();
 }
 
 function handle_settings(): string {
@@ -1556,24 +1814,24 @@ if ($page === 'notif_count') {
 
 $user = current_user();
 
-<<<<<<< HEAD
 $handlers = [
+    'dashboard' => ['fn'=>'handle_dashboard', 'title'=>'Dashboard'],
+    'dosen' => ['fn'=>'handle_dosen', 'title'=>'Dosen'],
+    'kelas' => ['fn'=>'handle_kelas', 'title'=>'Kelas'],
+    'khs' => ['fn'=>'handle_khs', 'title'=>'KHS'],
+    'krs' => ['fn'=>'handle_krs', 'title'=>'KRS'],
+    'landing_images' => ['fn'=>'handle_landing_images', 'title'=>'Landing Images'],
     'login' => ['fn'=>'handle_login', 'title'=>'Login'],
     'logout' => ['fn'=>'handle_logout', 'title'=>'Logout'],
-    'dashboard' => ['fn'=>'handle_dashboard', 'title'=>'Dashboard'],
-    'prodi' => ['fn'=>'handle_prodi', 'title'=>'Program Studi'],
     'mahasiswa' => ['fn'=>'handle_mahasiswa', 'title'=>'Mahasiswa'],
-    'dosen' => ['fn'=>'handle_dosen', 'title'=>'Dosen'],
     'mata_kuliah' => ['fn'=>'handle_mata_kuliah', 'title'=>'Mata Kuliah'],
-    'tahun_akademik' => ['fn'=>'handle_tahun_akademik', 'title'=>'Tahun Akademik'],
-    'kelas' => ['fn'=>'handle_kelas', 'title'=>'Kelas'],
-    'krs' => ['fn'=>'handle_krs', 'title'=>'KRS'],
     'nilai' => ['fn'=>'handle_nilai', 'title'=>'Nilai'],
     'presensi' => ['fn'=>'handle_presensi', 'title'=>'Presensi'],
-    'khs' => ['fn'=>'handle_khs', 'title'=>'KHS'],
+    'prodi' => ['fn'=>'handle_prodi', 'title'=>'Program Studi'],
+    'tahun_akademik' => ['fn'=>'handle_tahun_akademik', 'title'=>'Tahun Akademik'],
     'broadcast' => ['fn'=>'handle_broadcast', 'title'=>'Broadcast'],
 ];
-=======
+
 if (!$user && ($page === null || $page === '' || $page === 'login')) {
     if ($page === 'login') {
         $h = $handlers['login'];
@@ -1599,7 +1857,6 @@ if ($user && ($page === null || $page === '' || $page === 'dashboard')) {
 if (!isset($handlers[$page])) {
     $page = 'dashboard';
 }
->>>>>>> 57c0e26 (feat: implement landing page with customizable settings admin panel)
 
 $h = $handlers[$page];
 $content = $h['fn']();
