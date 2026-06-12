@@ -1803,7 +1803,7 @@ function render_landing_page(): string {
 <body>
     <header>
         <div class="logo">
-            <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+            <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
                 <text x="50" y="50" style="font-family: Arial, sans-serif; font-size: 70px; font-weight: bold; fill: currentColor; text-anchor: middle; dominant-baseline: middle;">S</text>
             </svg>
             <?=e($s['school_name'] ?? 'SIAKAD')?>
