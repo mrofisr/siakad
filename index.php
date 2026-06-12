@@ -168,12 +168,40 @@ function migrate(): void {
         );
         CREATE INDEX IF NOT EXISTS idx_notif_user_unread
             ON notifications(user_id, is_read, created_at);
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
     ");
 
     $count = $db->query("SELECT COUNT(*) FROM users")->fetchColumn();
     if ($count == 0) {
         $st = $db->prepare("INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')");
         $st->execute(['admin', password_hash('admin123', PASSWORD_DEFAULT)]);
+    }
+
+    $default_settings = [
+        'school_name' => 'Sistem Informasi Akademik',
+        'accent_color' => '#2c7a4b',
+        'hero_title' => 'Selamat Datang di Portal Akademik',
+        'hero_subtitle' => 'Portal akademik untuk mahasiswa dan dosen',
+        'card_1_title' => 'KRS Online',
+        'card_1_desc' => 'Pengisian Kartu Rencana Studi secara online',
+        'card_1_icon' => 'krs',
+        'card_2_title' => 'Nilai & Transkrip',
+        'card_2_desc' => 'Lihat nilai dan transkrip akademik',
+        'card_2_icon' => 'nilai',
+        'card_3_title' => 'Jadwal Kuliah',
+        'card_3_desc' => 'Akses jadwal perkuliahan mingguan',
+        'card_3_icon' => 'jadwal',
+        'footer_address' => 'Jl. Pendidikan No. 123, Kota, Indonesia',
+        'footer_email' => 'info@example.ac.id',
+        'footer_phone' => '(000) 000-0000',
+        'footer_copyright' => '© 2026 {school_name}. SIAKAD.',
+    ];
+    foreach ($default_settings as $key => $value) {
+        $st = $db->prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
+        $st->execute([$key, $value]);
     }
 }
 
@@ -248,6 +276,116 @@ function verify_csrf(): void {
         log_warning('CSRF validation failed', ['trace_id' => get_trace_id()]);
         die('CSRF token tidak valid.');
     }
+}
+
+function get_setting(string $key, string $default = ''): string {
+    $st = db()->prepare("SELECT value FROM settings WHERE key = ?");
+    $st->execute([$key]);
+    $value = $st->fetchColumn();
+    return $value !== false ? $value : $default;
+}
+
+function get_all_settings(): array {
+    $rows = db()->query("SELECT key, value FROM settings");
+    $settings = [];
+    foreach ($rows as $row) {
+        $settings[$row['key']] = $row['value'];
+    }
+    return $settings;
+}
+
+function update_setting(string $key, string $value): void {
+    $st = db()->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+    $st->execute([$key, $value]);
+}
+
+function handle_settings_save(): void {
+    verify_csrf();
+    
+    $settings = [
+        'school_name' => $_POST['school_name'] ?? '',
+        'accent_color' => $_POST['accent_color'] ?? '#2c7a4b',
+        'hero_title' => $_POST['hero_title'] ?? '',
+        'hero_subtitle' => $_POST['hero_subtitle'] ?? '',
+        'card_1_title' => $_POST['card_1_title'] ?? '',
+        'card_1_desc' => $_POST['card_1_desc'] ?? '',
+        'card_1_icon' => $_POST['card_1_icon'] ?? 'krs',
+        'card_2_title' => $_POST['card_2_title'] ?? '',
+        'card_2_desc' => $_POST['card_2_desc'] ?? '',
+        'card_2_icon' => $_POST['card_2_icon'] ?? 'nilai',
+        'card_3_title' => $_POST['card_3_title'] ?? '',
+        'card_3_desc' => $_POST['card_3_desc'] ?? '',
+        'card_3_icon' => $_POST['card_3_icon'] ?? 'jadwal',
+        'footer_address' => $_POST['footer_address'] ?? '',
+        'footer_email' => $_POST['footer_email'] ?? '',
+        'footer_phone' => $_POST['footer_phone'] ?? '',
+        'footer_copyright' => $_POST['footer_copyright'] ?? '',
+    ];
+    
+    foreach ($settings as $key => $value) {
+        update_setting($key, $value);
+    }
+    
+    flash_set('success', 'Pengaturan disimpan.');
+    redirect('?page=settings');
+}
+
+function handle_settings_upload(): void {
+    verify_csrf();
+    
+    $upload_dir = __DIR__ . '/uploads';
+    if (!is_dir($upload_dir)) {
+        mkdir($upload_dir, 0755, true);
+    }
+    
+    $allowed_logo_types = ['image/png', 'image/jpeg', 'image/svg+xml'];
+    $allowed_hero_types = ['image/png', 'image/jpeg'];
+    $max_size = 2 * 1024 * 1024;
+    
+    if (!empty($_FILES['logo']['tmp_name'])) {
+        $file = $_FILES['logo'];
+        if ($file['error'] === UPLOAD_ERR_OK) {
+            if ($file['size'] > $max_size) {
+                flash_set('error', 'Ukuran logo terlalu besar (max 2MB).');
+                redirect('?page=settings');
+            }
+            if (!in_array($file['type'], $allowed_logo_types)) {
+                flash_set('error', 'Format logo tidak valid (PNG, JPEG, SVG).');
+                redirect('?page=settings');
+            }
+            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $new_name = 'logo.' . $ext;
+            if (!move_uploaded_file($file['tmp_name'], "$upload_dir/$new_name")) {
+                flash_set('error', 'Gagal mengunggah logo.');
+                redirect('?page=settings');
+            }
+            log_info('Logo uploaded', ['filename' => $new_name, 'trace_id' => get_trace_id()]);
+        }
+    }
+    
+    if (!empty($_FILES['hero_image']['tmp_name'])) {
+        $file = $_FILES['hero_image'];
+        if ($file['error'] === UPLOAD_ERR_OK) {
+            if ($file['size'] > $max_size) {
+                flash_set('error', 'Ukuran hero image terlalu besar (max 2MB).');
+                redirect('?page=settings');
+            }
+            if (!in_array($file['type'], $allowed_hero_types)) {
+                flash_set('error', 'Format hero image tidak valid (PNG, JPEG).');
+                redirect('?page=settings');
+            }
+            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $new_name = 'hero.' . $ext;
+            if (!move_uploaded_file($file['tmp_name'], "$upload_dir/$new_name")) {
+                flash_set('error', 'Gagal mengunggah hero image.');
+                redirect('?page=settings');
+            }
+            log_info('Hero image uploaded', ['filename' => $new_name, 'trace_id' => get_trace_id()]);
+        }
+    }
+    
+    flash_set('success', 'Gambar berhasil diunggah.');
+    redirect('?page=settings');
 }
 
 function flash_get(): array {
@@ -325,7 +463,11 @@ function layout(string $title, string $content): void {
             $items['nilai'] = 'Nilai';
             $items['presensi'] = 'Presensi';
             $items['khs'] = 'KHS';
+<<<<<<< HEAD
             $items['broadcast'] = 'Broadcast';
+=======
+            $items['settings'] = 'Pengaturan';
+>>>>>>> 57c0e26 (feat: implement landing page with customizable settings admin panel)
         } elseif ($u['role'] === 'dosen') {
             $items['dashboard'] = 'Dashboard';
             $items['presensi'] = 'Presensi';
@@ -1123,20 +1265,277 @@ function jadwal_table_mhs(int $mhs_id): string {
     <?php return ob_get_clean();
 }
 
+function handle_settings(): string {
+    require_role('admin');
+    
+    if (method('POST')) {
+        if (isset($_POST['save'])) {
+            handle_settings_save();
+            return '';
+        }
+        if (isset($_POST['upload'])) {
+            handle_settings_upload();
+            return '';
+        }
+    }
+    
+    $s = get_all_settings();
+    $icons = ['krs', 'nilai', 'jadwal', 'calendar', 'book', 'graduation', 'clipboard', 'users', 'chart', 'clock', 'building', 'certificate'];
+    
+    ob_start(); ?>
+    <h1>Pengaturan Site</h1>
+    <form method="post" enctype="multipart/form-data">
+        <?=csrf_field()?>
+        <h2>Informasi Sekolah</h2>
+        <label>Nama Sekolah <input type="text" name="school_name" value="<?=e($s['school_name'])?>" required></label>
+        <label>Warna Aksen <input type="color" name="accent_color" value="<?=e($s['accent_color'])?>"></label>
+        <h2>Hero Section</h2>
+        <label>Judul Hero <input type="text" name="hero_title" value="<?=e($s['hero_title'])?>" required></label>
+        <label>Subtitle Hero <input type="text" name="hero_subtitle" value="<?=e($s['hero_subtitle'])?>" required></label>
+        <h2>Card 1</h2>
+        <label>Judul Card 1 <input type="text" name="card_1_title" value="<?=e($s['card_1_title'])?>" required></label>
+        <label>Deskripsi Card 1 <textarea name="card_1_desc" required><?=e($s['card_1_desc'])?></textarea></label>
+        <label>Icon Card 1 <select name="card_1_icon"><?php foreach ($icons as $icon): $sel=$icon==$s['card_1_icon']?' selected':''; echo "<option value=\"$icon\"$sel>" . ucwords(str_replace('_', ' ', $icon)) . "</option>"; endforeach; ?></select></label>
+        <h2>Card 2</h2>
+        <label>Judul Card 2 <input type="text" name="card_2_title" value="<?=e($s['card_2_title'])?>" required></label>
+        <label>Deskripsi Card 2 <textarea name="card_2_desc" required><?=e($s['card_2_desc'])?></textarea></label>
+        <label>Icon Card 2 <select name="card_2_icon"><?php foreach ($icons as $icon): $sel=$icon==$s['card_2_icon']?' selected':''; echo "<option value=\"$icon\"$sel>" . ucwords(str_replace('_', ' ', $icon)) . "</option>"; endforeach; ?></select></label>
+        <h2>Card 3</h2>
+        <label>Judul Card 3 <input type="text" name="card_3_title" value="<?=e($s['card_3_title'])?>" required></label>
+        <label>Deskripsi Card 3 <textarea name="card_3_desc" required><?=e($s['card_3_desc'])?></textarea></label>
+        <label>Icon Card 3 <select name="card_3_icon"><?php foreach ($icons as $icon): $sel=$icon==$s['card_3_icon']?' selected':''; echo "<option value=\"$icon\"$sel>" . ucwords(str_replace('_', ' ', $icon)) . "</option>"; endforeach; ?></select></label>
+        <h2>Footer</h2>
+        <label>Alamat Footer <textarea name="footer_address" required><?=e($s['footer_address'])?></textarea></label>
+        <label>Email Footer <input type="email" name="footer_email" value="<?=e($s['footer_email'])?>" required></label>
+        <label>Telepon Footer <input type="text" name="footer_phone" value="<?=e($s['footer_phone'])?>" required></label>
+        <label>Hak Cipta <input type="text" name="footer_copyright" value="<?=e($s['footer_copyright'])?>" required></label>
+        <h2>Gambar</h2>
+        <label>Logo (PNG, JPEG, SVG) <input type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml"></label>
+        <label>Hero Image (PNG, JPEG) <input type="file" name="hero_image" accept="image/png,image/jpeg"></label>
+        <button type="submit" name="save">Simpan Pengaturan</button>
+        <button type="submit" name="upload">Unggah Gambar</button>
+    </form>
+    <?php return ob_get_clean();
+}
+
+function render_landing_page(): string {
+    $s = get_all_settings();
+    
+    $logo_path = 'assets/defaults/logo.png';
+    if (file_exists(__DIR__ . '/uploads/logo.png')) {
+        $logo_path = 'uploads/logo.png';
+    } elseif (file_exists(__DIR__ . '/uploads/logo.jpg')) {
+        $logo_path = 'uploads/logo.jpg';
+    } elseif (file_exists(__DIR__ . '/uploads/logo.jpeg')) {
+        $logo_path = 'uploads/logo.jpeg';
+    } elseif (file_exists(__DIR__ . '/uploads/logo.svg')) {
+        $logo_path = 'uploads/logo.svg';
+    }
+    
+    $hero_path = 'assets/defaults/hero.svg';
+    if (file_exists(__DIR__ . '/uploads/hero.png')) {
+        $hero_path = 'uploads/hero.png';
+    } elseif (file_exists(__DIR__ . '/uploads/hero.jpg')) {
+        $hero_path = 'uploads/hero.jpg';
+    }
+    
+    $accent_color = $s['accent_color'] ?? '#2c7a4b';
+    
+    ob_start(); ?>
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><?=e($s['school_name'] ?? 'SIAKAD')?></title>
+    <style>
+        :root {
+            --accent-color: <?=e($accent_color)?>;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        header {
+            background: #fff;
+            border-bottom: 1px solid #eee;
+            padding: 1rem 2rem;
+        }
+        header .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        header .logo img {
+            height: 2.5rem;
+            width: auto;
+        }
+        .hero {
+            background: linear-gradient(135deg, #f6f7f9 0%, #eef0f2 100%);
+            padding: 4rem 2rem;
+            text-align: center;
+        }
+        .hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: #222;
+        }
+        .hero p {
+            font-size: 1.25rem;
+            color: #666;
+            max-width: 600px;
+            margin: 0 auto 2rem;
+        }
+        .hero img {
+            max-width: 100%;
+            height: auto;
+            max-height: 300px;
+            object-fit: contain;
+        }
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            padding: 3rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+        }
+        .card-icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 1rem;
+        }
+        .card h3 {
+            margin-bottom: 0.75rem;
+            color: var(--accent-color);
+        }
+        .card p {
+            color: #666;
+        }
+        footer {
+            background: #222;
+            color: #fff;
+            padding: 2rem 2rem 1rem;
+        }
+        footer .footer-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+        }
+        footer h4 {
+            margin-bottom: 1rem;
+            color: var(--accent-color);
+        }
+        footer p, footer a {
+            color: #bbb;
+            font-size: 0.9rem;
+        }
+        footer a { text-decoration: none; }
+        footer a:hover { color: var(--accent-color); }
+        footer .copyright {
+            text-align: center;
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #444;
+            color: #888;
+            font-size: 0.85rem;
+        }
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 1.75rem; }
+            .cards { padding: 1rem; }
+        }
+    </style>
+    <link rel="stylesheet" href="landing.css">
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <img src="<?=e($logo_path)?>" alt="Logo">
+            <?=e($s['school_name'] ?? 'SIAKAD')?>
+        </div>
+    </header>
+    
+    <section class="hero">
+        <img src="<?=e($hero_path)?>" alt="Hero Image">
+        <h1><?=e($s['hero_title'] ?? 'Selamat Datang di Portal Akademik')?></h1>
+        <p><?=e($s['hero_subtitle'] ?? 'Portal akademik untuk mahasiswa dan dosen')?></p>
+    </section>
+    
+    <section class="cards">
+        <article class="card">
+            <img src="assets/icons/<?=e($s['card_1_icon'] ?? 'krs')?>.svg" class="card-icon" alt="Icon">
+            <h3><?=e($s['card_1_title'] ?? 'KRS Online')?></h3>
+            <p><?=e($s['card_1_desc'] ?? 'Pengisian Kartu Rencana Studi secara online')?></p>
+        </article>
+        <article class="card">
+            <img src="assets/icons/<?=e($s['card_2_icon'] ?? 'nilai')?>.svg" class="card-icon" alt="Icon">
+            <h3><?=e($s['card_2_title'] ?? 'Nilai & Transkrip')?></h3>
+            <p><?=e($s['card_2_desc'] ?? 'Lihat nilai dan transkrip akademik')?></p>
+        </article>
+        <article class="card">
+            <img src="assets/icons/<?=e($s['card_3_icon'] ?? 'jadwal')?>.svg" class="card-icon" alt="Icon">
+            <h3><?=e($s['card_3_title'] ?? 'Jadwal Kuliah')?></h3>
+            <p><?=e($s['card_3_desc'] ?? 'Akses jadwal perkuliahan mingguan')?></p>
+        </article>
+    </section>
+    
+    <footer>
+        <div class="footer-content">
+            <div>
+                <h4>Contact</h4>
+                <p><?=e($s['footer_email'] ?? 'info@example.ac.id')?></p>
+                <p><?=e($s['footer_phone'] ?? '(000) 000-0000')?></p>
+            </div>
+            <div>
+                <h4>Address</h4>
+                <p><?=e($s['footer_address'] ?? 'Jl. Pendidikan No. 123, Kota, Indonesia')?></p>
+            </div>
+        </div>
+        <div class="copyright">
+            <?=e(str_replace('{school_name}', $s['school_name'] ?? 'SIAKAD', $s['footer_copyright'] ?? '© 2026 SIAKAD'))?>
+        </div>
+    </footer>
+</body>
+</html>
+<?php
+    return ob_get_clean();
+}
+
 migrate();
 verify_csrf();
 
 if (session_status() === PHP_SESSION_ACTIVE && empty($_SESSION['trace_id'])) {
     $_SESSION['trace_id'] = bin2hex(random_bytes(8));
 }
-log_info('Request started', ['page' => $_GET['page'] ?? 'dashboard', 'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'trace_id' => get_trace_id()]);
+log_info('Request started', ['page' => $_GET['page'] ?? 'landing', 'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown', 'trace_id' => get_trace_id()]);
 
-$page = $_GET['page'] ?? 'dashboard';
+$page = $_GET['page'] ?? null;
+
 if ($page === 'ping') {
     header('Content-Type: text/plain');
     echo 'pong';
     exit;
 }
+
 if ($page === 'health') {
     header('Content-Type: application/json');
     try {
@@ -1156,8 +1555,8 @@ if ($page === 'notif_count') {
 }
 
 $user = current_user();
-if (!$user && $page !== 'login') redirect('?page=login');
 
+<<<<<<< HEAD
 $handlers = [
     'login' => ['fn'=>'handle_login', 'title'=>'Login'],
     'logout' => ['fn'=>'handle_logout', 'title'=>'Logout'],
@@ -1174,9 +1573,37 @@ $handlers = [
     'khs' => ['fn'=>'handle_khs', 'title'=>'KHS'],
     'broadcast' => ['fn'=>'handle_broadcast', 'title'=>'Broadcast'],
 ];
+=======
+if (!$user && ($page === null || $page === '' || $page === 'login')) {
+    if ($page === 'login') {
+        $h = $handlers['login'];
+        layout($h['title'], $h['fn']());
+        log_info('Request completed', ['page' => 'login', 'status' => 'success', 'trace_id' => get_trace_id()]);
+        exit;
+    }
+    
+    header('Content-Type: text/html; charset=utf-8');
+    echo render_landing_page();
+    log_info('Request completed', ['page' => 'landing', 'status' => 'success', 'trace_id' => get_trace_id()]);
+    exit;
+}
 
-if (!isset($handlers[$page])) $page = 'dashboard';
+if (!$user && $page !== 'login') {
+    redirect('?page=login');
+}
+
+if ($user && ($page === null || $page === '' || $page === 'dashboard')) {
+    redirect('?page=dashboard');
+}
+
+if (!isset($handlers[$page])) {
+    $page = 'dashboard';
+}
+>>>>>>> 57c0e26 (feat: implement landing page with customizable settings admin panel)
+
 $h = $handlers[$page];
 $content = $h['fn']();
-if ($page !== 'logout') layout($h['title'], $content);
+if ($page !== 'logout') {
+    layout($h['title'], $content);
+}
 log_info('Request completed', ['page' => $page, 'status' => 'success', 'trace_id' => get_trace_id()]);
