@@ -127,4 +127,30 @@ document.addEventListener('DOMContentLoaded', function () {
         fetchBadgeCount();
         connectSSE();
     }
+
+    // ===== SIDEBAR COLLAPSE TOGGLE =====
+    var toggleBtn = document.getElementById('sidebar-toggle');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (window.innerWidth <= 768) {
+                document.body.classList.toggle('sidebar-open');
+                document.body.classList.remove('sidebar-collapsed');
+            } else {
+                document.body.classList.toggle('sidebar-collapsed');
+                document.body.classList.remove('sidebar-open');
+                localStorage.setItem('sidebar_collapsed', document.body.classList.contains('sidebar-collapsed') ? '1' : '0');
+            }
+        });
+    }
+
+    // Close sidebar on mobile when clicking outside
+    document.addEventListener('click', function (e) {
+        if (window.innerWidth <= 768 && document.body.classList.contains('sidebar-open')) {
+            var sidebar = document.querySelector('.site-sidebar');
+            if (sidebar && !sidebar.contains(e.target) && e.target !== toggleBtn && !toggleBtn.contains(e.target)) {
+                document.body.classList.remove('sidebar-open');
+            }
+        }
+    });
 });
