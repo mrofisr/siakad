@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# Database (runtime)
+siakad.db
+siakad.db-shm
+siakad.db-wal
+
+# Logs
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Docker
+docker-compose.yml
+Dockerfile
+
+# Documentation
+README.md
+LICENSE
+docs/
+
+# OpenCode / Serena
+.opencode/
+.openspec/
+.serena/
+AGENTS.md
