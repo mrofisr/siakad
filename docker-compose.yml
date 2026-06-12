@@ -1,15 +1,21 @@
+version: '3.9'
+
 services:
   siakad:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: siakad-app
+    restart: unless-stopped
     ports:
       - "8080:80"
     volumes:
       - siakad-data:/var/www/html/data
       - siakad-logs:/var/www/html/logs
-    restart: unless-stopped
+      - siakad-uploads:/var/www/html/uploads
     environment:
       - TZ=Asia/Jakarta
+      - DB_PATH=/var/www/html/data/siakad.db
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/index.php?page=health"]
       interval: 30s
@@ -19,4 +25,8 @@ services:
 
 volumes:
   siakad-data:
+    driver: local
   siakad-logs:
+    driver: local
+  siakad-uploads:
+    driver: local
