@@ -19,3 +19,8 @@ Thumbs.db
 
 # Serena local project config
 .serena/
+
+# Uploads (user content)
+uploads/
+*.log
+logs/
