@@ -681,8 +681,6 @@ strong{ font-weight: 600; color: var(--color-text); }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px){
-    .nav-inner{ flex-wrap: wrap; height: auto; padding: 0.75rem 0; gap: 0.5rem; }
-    .nav-links{ order: 3; width: 100%; gap: 0.125rem; }
     .container{ padding: 2rem 1.25rem; }
     h1{ font-size: 1.6rem; }
     .grid{ grid-template-columns: 1fr; }
