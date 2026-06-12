@@ -227,7 +227,7 @@ body {
     justify-content: space-between;
     padding: 0 1.5rem;
     z-index: 99;
-    margin-left: var(--sidebar-width);
+    margin-left: 0;
     transition: margin-left var(--transition-speed) ease;
 }
 
@@ -262,10 +262,16 @@ body {
 /* Main Content Area */
 .site-main {
     flex: 1;
-    margin-left: var(--sidebar-width);
+    margin-left: 0;
     transition: margin-left var(--transition-speed) ease;
     padding: 2rem;
     width: auto;
+}
+
+/* Shell present (logged in): offset content for the fixed sidebar */
+body.has-shell .site-topbar,
+body.has-shell .site-main {
+    margin-left: var(--sidebar-width);
 }
 
 .container {
@@ -292,12 +298,15 @@ body.sidebar-collapsed .site-main {
         transform: translateX(-100%);
     }
     
-    .site-topbar {
+    body.has-shell .site-topbar {
         margin-left: 0;
     }
     
-    .site-main {
+    body.has-shell .site-main {
         margin-left: 0;
+    }
+
+    .site-main {
         padding: 1.5rem 1rem;
     }
     
