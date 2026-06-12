@@ -157,6 +157,17 @@ function migrate(): void {
             role TEXT NOT NULL,
             linked_id INTEGER
         );
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT DEFAULT '',
+            is_read INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_notif_user_unread
+            ON notifications(user_id, is_read, created_at);
     ");
 
     $count = $db->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -244,6 +255,26 @@ function flash_get(): array {
 }
 function flash_set(string $key, string $msg): void { $_SESSION['flash'][$key] = $msg; }
 
+function notify(int $user_id, string $type, string $title, string $body = ''): void {
+    $st = db()->prepare("INSERT INTO notifications (user_id, type, title, body, created_at) VALUES (?, ?, ?, ?, datetime('now'))");
+    $st->execute([$user_id, $type, $title, $body]);
+}
+
+function notify_role(string $role, string $type, string $title, string $body = ''): void {
+    $users = db()->prepare("SELECT id FROM users WHERE role = ?");
+    $users->execute([$role]);
+    foreach ($users as $u) {
+        notify($u['id'], $type, $title, $body);
+    }
+}
+
+function notify_all(string $type, string $title, string $body = ''): void {
+    $users = db()->query("SELECT id FROM users");
+    foreach ($users as $u) {
+        notify($u['id'], $type, $title, $body);
+    }
+}
+
 function input(string $name, string $label, string $value = '', string $type = 'text', bool $req = false): string {
     $r = $req ? ' required' : ''; $v = e($value);
     return "<label>$label<input type=\"$type\" name=\"$name\" value=\"$v\"$r></label>";
@@ -294,6 +325,7 @@ function layout(string $title, string $content): void {
             $items['nilai'] = 'Nilai';
             $items['presensi'] = 'Presensi';
             $items['khs'] = 'KHS';
+            $items['broadcast'] = 'Broadcast';
         } elseif ($u['role'] === 'dosen') {
             $items['dashboard'] = 'Dashboard';
             $items['presensi'] = 'Presensi';
@@ -305,17 +337,159 @@ function layout(string $title, string $content): void {
         }
         $nav_l = '';
         foreach ($items as $p => $l) {
-            $a = ($_GET['page'] ?? '') === $p ? ' aria-current="page"' : '';
-            $nav_l .= "<li><a href=\"?page=$p\"$a>$l</a></li>\n";
+            $active = ($_GET['page'] ?? '') === $p ? ' class="nav-active"' : '';
+            $nav_l .= "<a href=\"?page=$p\"$active>$l</a>\n";
         }
-        $nav_l .= "<li><a href=\"?page=logout\">Logout (" . e($u['name']) . ")</a></li>";
-        $nav = "<nav><ul><li><strong>SIAKAD</strong></li></ul><ul>$nav_l</ul></nav>";
+        $role_label = ucfirst($u['role']);
+        $nav = <<<HTML
+        <nav class="site-nav">
+            <div class="nav-inner">
+                <div class="nav-brand">
+                    <span class="brand-mark">S</span>
+                    <span class="brand-text">SIAKAD</span>
+                </div>
+                <div class="nav-links">$nav_l</div>
+                <div class="nav-user">
+                    <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+                    <span class="user-badge">$role_label</span>
+                    <a href="?page=logout" class="nav-logout">{$u['name']}</a>
+                </div>
+            </div>
+        </nav>
+HTML;
     }
     $flash = '';
     foreach (flash_get() as $type => $msg) {
-        $flash .= "<p>" . e($msg) . "</p>\n";
+        $cls = $type === 'error' ? 'flash-error' : 'flash-success';
+        $flash .= "<div class=\"flash $cls\">" . e($msg) . "</div>\n";
     }
-    echo "<!DOCTYPE html><html data-theme=\"light\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>" . e($title) . " - SIAKAD</title><link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css\"></head><body><header class=\"container\">$nav</header><main class=\"container\">$flash$content</main></body></html>";
+    echo <<<HTML
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{$title} - SIAKAD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+$nav
+<main class="container">
+$flash
+$content
+</main>
+<script src="assets/js/main.js"></script>
+</body>
+</html>
+HTML;
+}
+
+function handle_sse(): void {
+    $u = current_user();
+    if (!$u) { http_response_code(401); exit; }
+
+    header('Content-Type: text/event-stream');
+    header('Cache-Control: no-cache');
+    header('Connection: keep-alive');
+    header('X-Accel-Buffering: no');
+
+    echo "retry: 5000\n\n";
+    ob_flush(); flush();
+
+    $last_id = 0;
+    $max_iterations = 100;
+    $i = 0;
+
+    while ($i < $max_iterations) {
+        // Cleanup old notifications (30 days)
+        db()->exec("DELETE FROM notifications WHERE created_at < datetime('now', '-30 days')");
+
+        $st = db()->prepare("SELECT id, type, title, body, created_at FROM notifications WHERE user_id = ? AND is_read = 0 AND id > ? ORDER BY id ASC");
+        $st->execute([$u['id'], $last_id]);
+        $rows = $st->fetchAll();
+
+        foreach ($rows as $row) {
+            $data = json_encode([
+                'id' => $row['id'],
+                'type' => $row['type'],
+                'title' => $row['title'],
+                'body' => $row['body'],
+                'created_at' => $row['created_at'],
+            ], JSON_UNESCAPED_SLASHES);
+            echo "id: {$row['id']}\n";
+            echo "data: $data\n\n";
+            $last_id = $row['id'];
+        }
+
+        if (!empty($rows)) {
+            $ids = array_column($rows, 'id');
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $upd = db()->prepare("UPDATE notifications SET is_read = 1 WHERE id IN ($placeholders)");
+            $upd->execute($ids);
+        }
+
+        ob_flush(); flush();
+
+        if (connection_aborted()) break;
+        sleep(3);
+        $i++;
+    }
+    exit;
+}
+
+function handle_notif_count(): void {
+    $u = current_user();
+    if (!$u) { http_response_code(401); echo json_encode(['count' => 0]); exit; }
+
+    header('Content-Type: application/json');
+    $st = db()->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
+    $st->execute([$u['id']]);
+    $count = (int) $st->fetchColumn();
+    echo json_encode(['count' => $count]);
+    exit;
+}
+
+function handle_broadcast(): string {
+    require_role('admin');
+    if (method('POST')) {
+        verify_csrf();
+        $title = trim($_POST['title'] ?? '');
+        $body = trim($_POST['body'] ?? '');
+        $target = $_POST['target'] ?? 'all';
+
+        if ($title === '') {
+            flash_set('error', 'Judul notifikasi wajib diisi.');
+            redirect('?page=broadcast');
+        }
+
+        if ($target === 'all') {
+            notify_all('broadcast', $title, $body);
+        } else {
+            notify_role($target, 'broadcast', $title, $body);
+        }
+
+        log_info('Broadcast sent', ['target' => $target, 'title' => $title, 'trace_id' => get_trace_id()]);
+        flash_set('success', 'Notifikasi broadcast terkirim.');
+        redirect('?page=broadcast');
+    }
+
+    ob_start(); ?>
+    <h1>Broadcast Notifikasi</h1>
+    <form method="post">
+        <?=csrf_field()?>
+        <?=input('title', 'Judul', '', 'text', true)?>
+        <?=textarea('body', 'Isi Pesan (opsional)')?>
+        <label>Target <select name="target">
+            <option value="all">Semua Pengguna</option>
+            <option value="mahasiswa">Mahasiswa</option>
+            <option value="dosen">Dosen</option>
+        </select></label>
+        <button type="submit">Kirim Broadcast</button>
+    </form>
+    <?php return ob_get_clean();
 }
 
 function handle_login(): string {
@@ -703,6 +877,16 @@ function handle_krs_mhs(array $u): string {
         if (isset($result['error'])) {
             flash_set('error', $result['error']);
         } else {
+            // Notify mahasiswa of successful KRS enrollment
+            $user_st = db()->prepare("SELECT u.id FROM users u WHERE u.role = 'mahasiswa' AND u.linked_id = ?");
+            $user_st->execute([$mhs_id]);
+            $uid = $user_st->fetchColumn();
+            if ($uid) {
+                $mk_info = db()->prepare("SELECT mk.nama FROM kelas k JOIN mata_kuliah mk ON mk.id = k.mk_id WHERE k.id = ?");
+                $mk_info->execute([$_POST['kelas_id']]);
+                $mk_nama = $mk_info->fetchColumn() ?: 'Kelas';
+                notify((int)$uid, 'krs', "KRS Anda telah disetujui untuk $mk_nama");
+            }
             flash_set('success', 'KRS berhasil didaftarkan.');
         }
         redirect('?page=krs');
@@ -782,6 +966,15 @@ function handle_nilai(): string {
             $st = db()->prepare("INSERT OR REPLACE INTO nilai (krs_id, nilai_angka) VALUES (?, ?)");
             $st->execute([$krs_id, $na]);
         }
+        // Notify students in this class that grades were published
+        $mk_info = db()->prepare("SELECT mk.nama FROM kelas k JOIN mata_kuliah mk ON mk.id = k.mk_id WHERE k.id = ?");
+        $mk_info->execute([$kelas_id]);
+        $mk_nama = $mk_info->fetchColumn() ?: 'Mata Kuliah';
+        $enrolled = db()->prepare("SELECT m.id AS mhs_id, u.id AS user_id FROM krs JOIN mahasiswa m ON m.id = krs.mahasiswa_id JOIN users u ON u.linked_id = m.id AND u.role = 'mahasiswa' WHERE krs.kelas_id = ?");
+        $enrolled->execute([$kelas_id]);
+        foreach ($enrolled as $row) {
+            notify($row['user_id'], 'nilai', "Nilai telah dipublikasikan untuk $mk_nama");
+        }
         flash_set('success', 'Nilai tersimpan.'); redirect('?page=nilai&kelas_id=' . $kelas_id);
     }
 }
@@ -833,6 +1026,18 @@ function handle_presensi(): string {
                 $chk->execute([$kelas_id, $mhs_id]); if (!$chk->fetch()) continue;
             }
             $st->execute([$kelas_id, $mhs_id, $tanggal, $status]);
+            // Notify student if marked alpha
+            if ($status === 'alpha') {
+                $mk_info = db()->prepare("SELECT mk.nama FROM kelas k JOIN mata_kuliah mk ON mk.id = k.mk_id WHERE k.id = ?");
+                $mk_info->execute([$kelas_id]);
+                $mk_nama = $mk_info->fetchColumn() ?: 'Mata Kuliah';
+                $user_st = db()->prepare("SELECT u.id FROM users u WHERE u.role = 'mahasiswa' AND u.linked_id = ?");
+                $user_st->execute([$mhs_id]);
+                $uid = $user_st->fetchColumn();
+                if ($uid) {
+                    notify((int)$uid, 'presensi', "Anda tercatat alpha pada $mk_nama tanggal $tanggal");
+                }
+            }
         }
         flash_set('success', "Presensi $tanggal tersimpan.");
         redirect("?page=presensi&kelas_id=$kelas_id&tanggal=$tanggal");
@@ -943,6 +1148,12 @@ if ($page === 'health') {
     echo json_encode(['status' => $status, 'database' => $status, 'timestamp' => gmdate('Y-m-d\TH:i:s\Z')]);
     exit;
 }
+if ($page === 'sse') {
+    handle_sse();
+}
+if ($page === 'notif_count') {
+    handle_notif_count();
+}
 
 $user = current_user();
 if (!$user && $page !== 'login') redirect('?page=login');
@@ -961,6 +1172,7 @@ $handlers = [
     'nilai' => ['fn'=>'handle_nilai', 'title'=>'Nilai'],
     'presensi' => ['fn'=>'handle_presensi', 'title'=>'Presensi'],
     'khs' => ['fn'=>'handle_khs', 'title'=>'KHS'],
+    'broadcast' => ['fn'=>'handle_broadcast', 'title'=>'Broadcast'],
 ];
 
 if (!isset($handlers[$page])) $page = 'dashboard';
