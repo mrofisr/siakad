@@ -489,24 +489,40 @@ function layout(string $title, string $content): void {
             $items['krs'] = 'KRS';
             $items['khs'] = 'KHS';
         }
+        // Map each page to its icon file (file names differ from page keys)
+        $icon_map = [
+            'dashboard'      => 'chart',
+            'prodi'          => 'building',
+            'mahasiswa'      => 'graduation',
+            'dosen'          => 'users',
+            'mata_kuliah'    => 'book',
+            'tahun_akademik' => 'calendar',
+            'kelas'          => 'clipboard',
+            'krs'            => 'krs',
+            'nilai'          => 'nilai',
+            'presensi'       => 'clock',
+            'khs'            => 'certificate',
+            'broadcast'      => 'jadwal',
+            'settings'       => 'settings',
+        ];
         $nav_l = '';
         foreach ($items as $p => $l) {
             $active = ($_GET['page'] ?? '') === $p ? ' class="nav-active"' : '';
-            
-            // Map settings to settings.svg, others to corresponding SVGs
-            $icon_file = "assets/icons/{$p}.svg";
+
+            $icon_name = $icon_map[$p] ?? $p;
+            $icon_file = __DIR__ . "/assets/icons/{$icon_name}.svg";
             $icon_svg = '';
             if (file_exists($icon_file)) {
                 $icon_svg = file_get_contents($icon_file);
             }
-            
-            $nav_l .= "<a href=\"?page=$p\"$active>$icon_svg <span>$l</span></a>\n";
+
+            $nav_l .= "<a href=\"?page=$p\"$active>$icon_svg<span>$l</span></a>\n";
         }
         $role_label = ucfirst($u['role']);
         
         $menu_svg = '';
-        if (file_exists('assets/icons/menu.svg')) {
-            $menu_svg = file_get_contents('assets/icons/menu.svg');
+        if (file_exists(__DIR__ . '/assets/icons/menu.svg')) {
+            $menu_svg = file_get_contents(__DIR__ . '/assets/icons/menu.svg');
         }
 
         $sidebar = <<<HTML
@@ -546,6 +562,9 @@ HTML;
         $cls = $type === 'error' ? 'flash-error' : 'flash-success';
         $flash .= "<div class=\"flash $cls\">" . e($msg) . "</div>\n";
     }
+    $body_class = $u ? 'has-shell' : 'no-shell';
+    $css_ver = @filemtime(__DIR__ . '/assets/css/style.css') ?: time();
+    $js_ver = @filemtime(__DIR__ . '/assets/js/main.js') ?: time();
     echo <<<HTML
 <!DOCTYPE html>
 <html lang="id">
@@ -556,7 +575,7 @@ HTML;
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/style.css">
+<link rel="stylesheet" href="assets/css/style.css?v={$css_ver}">
 <script>
   // Restore sidebar state early to avoid visual flash/jump
   if (window.innerWidth > 768 && localStorage.getItem('sidebar_collapsed') === '1') {
@@ -564,7 +583,7 @@ HTML;
   }
 </script>
 </head>
-<body>
+<body class="$body_class">
 <script>
   // Synchronize documentElement class to body
   if (document.documentElement.classList.contains('sidebar-collapsed')) {
@@ -579,7 +598,7 @@ $topbar
         $content
     </div>
 </main>
-<script src="assets/js/main.js"></script>
+<script src="assets/js/main.js?v={$js_ver}"></script>
 </body>
 </html>
 HTML;
@@ -588,6 +607,13 @@ HTML;
 function handle_sse(): void {
     $u = current_user();
     if (!$u) { http_response_code(401); exit; }
+
+    // Release the session lock immediately: PHP holds an exclusive lock on the
+    // session file for the duration of the request. Because this handler keeps
+    // the connection open for minutes, any other request on the same session
+    // (e.g. navigating pages) would block until this stream ends. We already
+    // have everything we need from the session ($u), so close it now.
+    session_write_close();
 
     header('Content-Type: text/event-stream');
     header('Cache-Control: no-cache');
