@@ -1850,7 +1850,7 @@ if (!$user && $page !== 'login') {
     redirect('?page=login');
 }
 
-if ($user && ($page === null || $page === '' || $page === 'dashboard')) {
+if ($user && ($page === null || $page === '')) {
     redirect('?page=dashboard');
 }
 
