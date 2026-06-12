@@ -1777,7 +1777,9 @@ function render_landing_page(): string {
 <body>
     <header>
         <div class="logo">
-            <img src="<?=e($logo_path)?>" alt="Logo">
+            <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <text x="50" y="50" style="font-family: Arial, sans-serif; font-size: 70px; font-weight: bold; fill: currentColor; text-anchor: middle; dominant-baseline: middle;">S</text>
+            </svg>
             <?=e($s['school_name'] ?? 'SIAKAD')?>
         </div>
     </header>
