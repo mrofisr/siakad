@@ -462,7 +462,8 @@ function title(string $s): string { return ucwords(str_replace('_', ' ', $s)); }
 
 function layout(string $title, string $content): void {
     $u = current_user();
-    $nav = '';
+    $sidebar = '';
+    $topbar = '';
     if ($u) {
         $items = [];
         if ($u['role'] === 'admin') {
@@ -491,24 +492,53 @@ function layout(string $title, string $content): void {
         $nav_l = '';
         foreach ($items as $p => $l) {
             $active = ($_GET['page'] ?? '') === $p ? ' class="nav-active"' : '';
-            $nav_l .= "<a href=\"?page=$p\"$active>$l</a>\n";
+            
+            // Map settings to settings.svg, others to corresponding SVGs
+            $icon_file = "assets/icons/{$p}.svg";
+            $icon_svg = '';
+            if (file_exists($icon_file)) {
+                $icon_svg = file_get_contents($icon_file);
+            }
+            
+            $nav_l .= "<a href=\"?page=$p\"$active>$icon_svg <span>$l</span></a>\n";
         }
         $role_label = ucfirst($u['role']);
-        $nav = <<<HTML
-        <nav class="site-nav">
-            <div class="nav-inner">
-                <div class="nav-brand">
-                    <span class="brand-mark">S</span>
-                    <span class="brand-text">SIAKAD</span>
-                </div>
-                <div class="nav-links">$nav_l</div>
-                <div class="nav-user">
-                    <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+        
+        $menu_svg = '';
+        if (file_exists('assets/icons/menu.svg')) {
+            $menu_svg = file_get_contents('assets/icons/menu.svg');
+        }
+
+        $sidebar = <<<HTML
+        <aside class="site-sidebar">
+            <div class="sidebar-brand">
+                <span class="brand-mark">S</span>
+                <span class="brand-text">SIAKAD</span>
+            </div>
+            <nav class="sidebar-nav">
+                $nav_l
+            </nav>
+            <div class="sidebar-footer">
+                <div class="user-info">
                     <span class="user-badge">$role_label</span>
-                    <a href="?page=logout" class="nav-logout">{$u['name']}</a>
+                    <a href="?page=logout" class="nav-logout">Keluar</a>
+                </div>
+                <div style="font-size:0.8rem; color:var(--color-text-secondary); text-overflow:ellipsis; overflow:hidden; white-space:nowrap; margin-top:0.25rem;">
+                    {$u['name']}
                 </div>
             </div>
-        </nav>
+        </aside>
+HTML;
+
+        $topbar = <<<HTML
+        <header class="site-topbar">
+            <button id="sidebar-toggle" aria-label="Toggle Sidebar">
+                $menu_svg
+            </button>
+            <div class="topbar-right">
+                <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+            </div>
+        </header>
 HTML;
     }
     $flash = '';
@@ -527,12 +557,27 @@ HTML;
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/style.css">
+<script>
+  // Restore sidebar state early to avoid visual flash/jump
+  if (window.innerWidth > 768 && localStorage.getItem('sidebar_collapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+</script>
 </head>
 <body>
-$nav
-<main class="container">
-$flash
-$content
+<script>
+  // Synchronize documentElement class to body
+  if (document.documentElement.classList.contains('sidebar-collapsed')) {
+    document.body.classList.add('sidebar-collapsed');
+  }
+</script>
+$sidebar
+$topbar
+<main class="site-main">
+    <div class="container">
+        $flash
+        $content
+    </div>
 </main>
 <script src="assets/js/main.js"></script>
 </body>
