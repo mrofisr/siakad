@@ -3,6 +3,9 @@ siakad.db
 siakad.db-shm
 siakad.db-wal
 
+# Logs
+logs/
+
 # OS
 .DS_Store
 Thumbs.db
