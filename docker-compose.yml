@@ -1,22 +1,30 @@
 services:
   siakad:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: siakad-app
-    ports:
-      - "8080:80"
-    volumes:
-      - siakad-data:/var/www/html/data
-      - siakad-logs:/var/www/html/logs
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - siakad-data:/app/public/data
+      - siakad-logs:/app/public/logs
+      - siakad-uploads:/app/public/uploads
     environment:
       - TZ=Asia/Jakarta
+      - SERVER_NAME=:8080
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/index.php?page=health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/index.php?page=health"]
       interval: 30s
       timeout: 3s
-      start_period: 5s
+      start_period: 10s
       retries: 3
 
 volumes:
   siakad-data:
+    driver: local
   siakad-logs:
+    driver: local
+  siakad-uploads:
+    driver: local

@@ -1,22 +1,28 @@
-FROM php:8.3-apache
+FROM dunglas/frankenphp:latest-php8.3-alpine
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* \
-    && a2enmod rewrite \
-    && adduser --disabled-password --gecos "" --uid 1000 appuser \
-    && mkdir -p /var/www/html/logs \
-    && chown -R appuser:appuser /var/www/html \
-    && chown -R appuser:appuser /var/run/apache2 /var/lock/apache2 /var/log/apache2
+# Install required extensions and tools
+RUN apk add --no-cache curl sqlite \
+    && install-php-extensions pdo pdo_sqlite fileinfo \
+    && adduser -D -u 1000 appuser
 
-WORKDIR /var/www/html
+# FrankenPHP serves from /app/public by default
+# Copy app files directly into /app/public
+WORKDIR /app/public
 
 COPY --chown=appuser:appuser . .
 
-RUN chmod -R 755 /var/www/html \
-    && chmod -R 770 /var/www/html/logs
+# Create required directories with proper permissions
+RUN mkdir -p logs uploads/landing data \
+    && chmod -R 755 /app/public \
+    && chmod -R 770 /app/public/logs /app/public/uploads /app/public/data \
+    && chown -R appuser:appuser /app/public
 
 USER appuser
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost/index.php?page=health || exit 1
+ENV SERVER_NAME=":8080"
+ENV CADDY_SERVER_EXTRA_DIRECTIVES="root * /app/public"
 
-EXPOSE 80
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:8080/index.php?page=health || exit 1
