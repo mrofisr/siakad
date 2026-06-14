@@ -24,6 +24,6 @@ Thumbs.db
 .serena/
 
 # Uploads (user content)
-uploads/
+assets/
 *.log
 logs/
