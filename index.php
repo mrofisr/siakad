@@ -1418,7 +1418,7 @@ function handle_landing_images(): string {
     require_role('admin');
     
     $u = current_user();
-    $upload_dir = __DIR__ . '/uploads/landing';
+    $upload_dir = __DIR__ . '/assets/landing';
     
     // Ensure upload directory exists
     if (!is_dir($upload_dir)) {
@@ -1588,7 +1588,7 @@ function handle_landing_images(): string {
                         <td><?=e($img['original_filename'])?></td>
                         <td><?=number_format($img['file_size'] / 1024, 2)?> KB</td>
                         <td><?=e($img['uploaded_at'])?></td>
-                        <td><code>/uploads/landing/<?=e($slot)?>.<?=e(pathinfo($img['original_filename'], PATHINFO_EXTENSION))?></code></td>
+                        <td><code>/assets/landing/<?=e($slot)?>.<?=e(pathinfo($img['original_filename'], PATHINFO_EXTENSION))?></code></td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
@@ -1656,21 +1656,21 @@ function render_landing_page(): string {
     $s = get_all_settings();
     
     $logo_path = 'assets/defaults/logo.png';
-    if (file_exists(__DIR__ . '/uploads/logo.png')) {
-        $logo_path = 'uploads/logo.png';
-    } elseif (file_exists(__DIR__ . '/uploads/logo.jpg')) {
-        $logo_path = 'uploads/logo.jpg';
-    } elseif (file_exists(__DIR__ . '/uploads/logo.jpeg')) {
-        $logo_path = 'uploads/logo.jpeg';
-    } elseif (file_exists(__DIR__ . '/uploads/logo.svg')) {
-        $logo_path = 'uploads/logo.svg';
+    if (file_exists(__DIR__ . '/assets/logo.png')) {
+        $logo_path = 'assets/logo.png';
+    } elseif (file_exists(__DIR__ . '/assets/logo.jpg')) {
+        $logo_path = 'assets/logo.jpg';
+    } elseif (file_exists(__DIR__ . '/assets/logo.jpeg')) {
+        $logo_path = 'assets/logo.jpeg';
+    } elseif (file_exists(__DIR__ . '/assets/logo.svg')) {
+        $logo_path = 'assets/logo.svg';
     }
     
     $hero_path = 'assets/defaults/hero.svg';
-    if (file_exists(__DIR__ . '/uploads/hero.png')) {
-        $hero_path = 'uploads/hero.png';
-    } elseif (file_exists(__DIR__ . '/uploads/hero.jpg')) {
-        $hero_path = 'uploads/hero.jpg';
+    if (file_exists(__DIR__ . '/assets/hero.png')) {
+        $hero_path = 'assets/hero.png';
+    } elseif (file_exists(__DIR__ . '/assets/hero.jpg')) {
+        $hero_path = 'assets/hero.jpg';
     }
     
     $accent_color = $s['accent_color'] ?? '#2c7a4b';
