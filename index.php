@@ -791,15 +791,22 @@ function handle_login(): string {
         flash_set('error', 'Username atau password salah.');
     }
     ob_start(); ?>
-    <article style="max-width:400px;margin:4rem auto">
-        <hgroup><h1>Login</h1><p>Sistem Informasi Akademik</p></hgroup>
+    <div class="login-hero">
+        <h1><?=e(get_setting('school_name', 'SIAKAD'))?></h1>
+        <p><?=e(get_setting('hero_subtitle', 'Portal akademik untuk mahasiswa dan dosen'))?></p>
+    </div>
+    <div class="login-card">
+        <h1>Login</h1>
+        <p class="login-subtitle">Sistem Informasi Akademik</p>
         <form method="post">
             <?=csrf_field()?>
-            <label>Username <input type="text" name="username" required autocomplete="username"></label>
-            <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required autocomplete="username">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required autocomplete="current-password">
             <button type="submit">Login</button>
         </form>
-    </article>
+    </div>
     <?php return ob_get_clean();
 }
 
@@ -1682,159 +1689,46 @@ function render_landing_page(): string {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?=e($s['school_name'] ?? 'SIAKAD')?></title>
-    <style>
-        :root {
-            --accent-color: <?=e($accent_color)?>;
-        }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
-            line-height: 1.6;
-            color: #333;
-        }
-        header {
-            background: #fff;
-            border-bottom: 1px solid #eee;
-            padding: 1rem 2rem;
-        }
-        header .logo {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: var(--accent-color);
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-        header .logo img {
-            height: 2.5rem;
-            width: auto;
-        }
-        .hero {
-            background: linear-gradient(135deg, #f6f7f9 0%, #eef0f2 100%);
-            padding: 4rem 2rem;
-            text-align: center;
-        }
-        .hero h1 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            color: #222;
-        }
-        .hero p {
-            font-size: 1.25rem;
-            color: #666;
-            max-width: 600px;
-            margin: 0 auto 2rem;
-        }
-        .hero img {
-            max-width: 100%;
-            height: auto;
-            max-height: 300px;
-            object-fit: contain;
-        }
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 2rem;
-            padding: 3rem 2rem;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        .card {
-            background: #fff;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            padding: 2rem;
-            text-align: center;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-        .card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
-        }
-        .card-icon {
-            width: 64px;
-            height: 64px;
-            margin: 0 auto 1rem;
-        }
-        .card h3 {
-            margin-bottom: 0.75rem;
-            color: var(--accent-color);
-        }
-        .card p {
-            color: #666;
-        }
-        footer {
-            background: #222;
-            color: #fff;
-            padding: 2rem 2rem 1rem;
-        }
-        footer .footer-content {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 2rem;
-        }
-        footer h4 {
-            margin-bottom: 1rem;
-            color: var(--accent-color);
-        }
-        footer p, footer a {
-            color: #bbb;
-            font-size: 0.9rem;
-        }
-        footer a { text-decoration: none; }
-        footer a:hover { color: var(--accent-color); }
-        footer .copyright {
-            text-align: center;
-            margin-top: 2rem;
-            padding-top: 1rem;
-            border-top: 1px solid #444;
-            color: #888;
-            font-size: 0.85rem;
-        }
-        @media (max-width: 768px) {
-            .hero h1 { font-size: 1.75rem; }
-            .cards { padding: 1rem; }
-        }
-    </style>
-    <link rel="stylesheet" href="landing.css">
+    <style>:root { --accent-color: <?=e($accent_color)?>; }</style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css?v=<?=filemtime(__DIR__.'/assets/css/style.css')?>">
 </head>
-<body>
-    <header>
+<body class="landing-page">
+    <header class="landing-header">
         <div class="logo">
-            <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-                <text x="50" y="50" style="font-family: Arial, sans-serif; font-size: 70px; font-weight: bold; fill: currentColor; text-anchor: middle; dominant-baseline: middle;">S</text>
-            </svg>
-            <?=e($s['school_name'] ?? 'SIAKAD')?>
+            <img src="<?=e($logo_path)?>" alt="Logo">
+            <span><?=e($s['school_name'] ?? 'SIAKAD')?></span>
         </div>
+        <a href="?page=login" class="login-btn">Login</a>
     </header>
     
-    <section class="hero">
+    <section class="landing-hero">
         <img src="<?=e($hero_path)?>" alt="Hero Image">
         <h1><?=e($s['hero_title'] ?? 'Selamat Datang di Portal Akademik')?></h1>
         <p><?=e($s['hero_subtitle'] ?? 'Portal akademik untuk mahasiswa dan dosen')?></p>
     </section>
     
-    <section class="cards">
-        <article class="card">
+    <section class="landing-cards">
+        <article class="landing-card">
             <img src="assets/icons/<?=e($s['card_1_icon'] ?? 'krs')?>.svg" class="card-icon" alt="Icon">
             <h3><?=e($s['card_1_title'] ?? 'KRS Online')?></h3>
             <p><?=e($s['card_1_desc'] ?? 'Pengisian Kartu Rencana Studi secara online')?></p>
         </article>
-        <article class="card">
+        <article class="landing-card">
             <img src="assets/icons/<?=e($s['card_2_icon'] ?? 'nilai')?>.svg" class="card-icon" alt="Icon">
             <h3><?=e($s['card_2_title'] ?? 'Nilai & Transkrip')?></h3>
             <p><?=e($s['card_2_desc'] ?? 'Lihat nilai dan transkrip akademik')?></p>
         </article>
-        <article class="card">
+        <article class="landing-card">
             <img src="assets/icons/<?=e($s['card_3_icon'] ?? 'jadwal')?>.svg" class="card-icon" alt="Icon">
             <h3><?=e($s['card_3_title'] ?? 'Jadwal Kuliah')?></h3>
             <p><?=e($s['card_3_desc'] ?? 'Akses jadwal perkuliahan mingguan')?></p>
         </article>
     </section>
     
-    <footer>
+    <footer class="landing-footer">
         <div class="footer-content">
             <div>
                 <h4>Contact</h4>
