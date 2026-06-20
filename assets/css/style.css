@@ -694,3 +694,398 @@ strong{ font-weight: 600; color: var(--color-text); }
     h1{ font-size: 1.6rem; }
     .grid{ grid-template-columns: 1fr; }
 }
+
+/* ===== LANDING PAGE ===== */
+:root {
+    --accent-color: #2c7a4b;
+    --accent-color-dark: #1f5c38;
+}
+
+/* Landing Header */
+.landing-header {
+    position: sticky;
+    top: 0;
+    height: var(--topbar-height);
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 2rem;
+    z-index: 99;
+}
+
+.landing-header .logo {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--accent-color);
+    text-decoration: none;
+    border-bottom: none;
+}
+
+.landing-header .logo img {
+    height: 32px;
+    width: auto;
+    object-fit: contain;
+}
+
+.landing-header .login-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1.25rem;
+    font-family: var(--font-sans);
+    font-size: 0.82rem;
+    font-weight: 500;
+    background: var(--accent-color);
+    color: #ffffff;
+    border: none;
+    border-radius: 9999px;
+    text-decoration: none;
+    border-bottom: none;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.landing-header .login-btn:hover {
+    background: var(--accent-color-dark);
+    transform: none;
+}
+
+/* Landing Hero */
+.landing-hero {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--accent-color) 0%, rgba(31,92,56,0.95) 100%);
+    padding: 5rem 2rem;
+    text-align: center;
+}
+
+.landing-hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(255,255,255,0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 80%, rgba(255,255,255,0.04) 0%, transparent 50%);
+    pointer-events: none;
+    animation: ambientDrift 25s ease-in-out infinite alternate;
+}
+
+.landing-hero-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+}
+
+.landing-hero h1 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 2.5rem;
+    color: #ffffff;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 1rem;
+}
+
+.landing-hero p {
+    font-family: system-ui, var(--font-sans);
+    font-size: 1rem;
+    color: #ffffff;
+    opacity: 0.9;
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+
+.landing-hero-img {
+    margin-top: 2rem;
+    max-height: 300px;
+    width: auto;
+    border-radius: var(--radius);
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Landing Cards */
+.landing-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    max-width: 1200px;
+    margin: 3rem auto;
+    padding: 0 2rem;
+}
+
+.landing-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 2rem 1.5rem;
+    box-shadow: var(--shadow-card);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    text-align: center;
+}
+
+.landing-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-card-hover);
+}
+
+.landing-card svg,
+.landing-card .card-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1rem;
+    display: block;
+    color: var(--accent-color);
+}
+
+.landing-card h3 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 1.1rem;
+    color: var(--accent-color);
+    margin-bottom: 0.5rem;
+    letter-spacing: -0.02em;
+}
+
+.landing-card p {
+    font-family: system-ui, var(--font-sans);
+    font-size: 0.88rem;
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    margin-bottom: 0;
+}
+
+/* Landing Footer */
+.landing-footer {
+    background: #1a1a2e;
+    color: rgba(255,255,255,0.75);
+    padding: 3rem 2rem 1.5rem;
+}
+
+.landing-footer-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-bottom: 2rem;
+}
+
+.landing-footer h4 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #ffffff;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.02em;
+}
+
+.landing-footer p,
+.landing-footer address {
+    font-size: 0.82rem;
+    color: rgba(255,255,255,0.6);
+    line-height: 1.6;
+    font-style: normal;
+    margin-bottom: 0;
+}
+
+.landing-footer-copy {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
+    text-align: center;
+    font-size: 0.75rem;
+    color: rgba(255,255,255,0.4);
+}
+
+/* Landing Responsive */
+@media (max-width: 768px) {
+    .landing-header {
+        padding: 0 1rem;
+    }
+
+    .landing-hero {
+        padding: 3rem 1.25rem;
+    }
+
+    .landing-hero h1 {
+        font-size: 1.75rem;
+    }
+
+    .landing-hero p {
+        font-size: 0.9rem;
+    }
+
+    .landing-cards {
+        grid-template-columns: 1fr;
+        padding: 0 1.25rem;
+        margin: 2rem auto;
+    }
+
+    .landing-footer-inner {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+}
+
+/* ===== LOGIN PAGE ===== */
+
+/* Login Hero */
+.login-hero {
+    position: relative;
+    overflow: hidden;
+    background: linear-gradient(135deg, var(--accent-color) 0%, rgba(31,92,56,0.95) 100%);
+    padding: 3rem 2rem;
+    text-align: center;
+}
+
+.login-hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 20%, rgba(255,255,255,0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 80%, rgba(255,255,255,0.04) 0%, transparent 50%);
+    pointer-events: none;
+    animation: ambientDrift 25s ease-in-out infinite alternate;
+}
+
+.login-hero-inner {
+    position: relative;
+    z-index: 1;
+}
+
+.login-hero h1 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 1.75rem;
+    color: #ffffff;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin-bottom: 0.5rem;
+}
+
+.login-hero p {
+    font-family: system-ui, var(--font-sans);
+    font-size: 0.9rem;
+    color: #ffffff;
+    opacity: 0.9;
+    margin-bottom: 0;
+    line-height: 1.5;
+}
+
+/* Login Card */
+.login-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 2.5rem;
+    max-width: 400px;
+    margin: 2.5rem auto;
+    box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+}
+
+.login-card h1 {
+    font-family: var(--font-serif);
+    font-weight: 600;
+    font-size: 1.5rem;
+    color: var(--color-primary);
+    margin-bottom: 0.25rem;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+}
+
+.login-card .login-subtitle {
+    font-size: 0.82rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 1.75rem;
+    line-height: 1.4;
+}
+
+.login-card label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--color-text);
+    margin-bottom: 1.25rem;
+}
+
+.login-card input[type="text"],
+.login-card input[type="password"],
+.login-card input[type="email"] {
+    display: block;
+    width: 100%;
+    margin-top: 0.35rem;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 0.88rem;
+    color: var(--color-text);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.login-card input:focus {
+    border-color: var(--accent-color);
+}
+
+.login-card button[type="submit"],
+.login-card .btn-login {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    padding: 0.65rem 1.25rem;
+    margin-top: 0.5rem;
+    font-family: var(--font-sans);
+    font-size: 0.88rem;
+    font-weight: 500;
+    background: var(--accent-color);
+    color: #ffffff;
+    border: none;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.login-card button[type="submit"]:hover,
+.login-card .btn-login:hover {
+    background: var(--accent-color-dark);
+}
+
+.login-card button[type="submit"]:active,
+.login-card .btn-login:active {
+    transform: scale(0.98);
+}
+
+/* Login Responsive */
+@media (max-width: 768px) {
+    .login-hero {
+        padding: 2rem 1.25rem;
+    }
+
+    .login-hero h1 {
+        font-size: 1.4rem;
+    }
+
+    .login-card {
+        margin: 1.5rem 1rem;
+        padding: 1.75rem 1.25rem;
+    }
+}
