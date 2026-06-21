@@ -58,7 +58,15 @@ function db(): PDO {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-        $pdo->exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
+        $pdo->exec('
+            PRAGMA journal_mode=WAL;
+            PRAGMA foreign_keys=ON;
+            PRAGMA synchronous=NORMAL;
+            PRAGMA cache_size=-64000;
+            PRAGMA temp_store=MEMORY;
+            PRAGMA mmap_size=268435456;
+            PRAGMA busy_timeout=5000;
+        ');
     }
     return $pdo;
 }
@@ -186,6 +194,27 @@ function migrate(): void {
             uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             uploaded_by INTEGER REFERENCES users(id) ON DELETE CASCADE
         );
+
+        -- Foreign key + frequent-query indexes (speeds up JOINs, lookups, filters)
+        CREATE INDEX IF NOT EXISTS idx_mahasiswa_prodi      ON mahasiswa(prodi_id);
+        CREATE INDEX IF NOT EXISTS idx_mahasiswa_angkatan   ON mahasiswa(angkatan);
+        CREATE INDEX IF NOT EXISTS idx_dosen_prodi          ON dosen(prodi_id);
+        CREATE INDEX IF NOT EXISTS idx_mk_prodi             ON mata_kuliah(prodi_id);
+        CREATE INDEX IF NOT EXISTS idx_mk_semester          ON mata_kuliah(semester);
+        CREATE INDEX IF NOT EXISTS idx_kelas_mk             ON kelas(mk_id);
+        CREATE INDEX IF NOT EXISTS idx_kelas_dosen          ON kelas(dosen_id);
+        CREATE INDEX IF NOT EXISTS idx_kelas_ta             ON kelas(tahun_akademik_id);
+        CREATE INDEX IF NOT EXISTS idx_jadwal_kelas         ON jadwal(kelas_id);
+        CREATE INDEX IF NOT EXISTS idx_krs_mahasiswa        ON krs(mahasiswa_id);
+        CREATE INDEX IF NOT EXISTS idx_krs_kelas            ON krs(kelas_id);
+        CREATE INDEX IF NOT EXISTS idx_krs_ta               ON krs(tahun_akademik_id);
+        CREATE INDEX IF NOT EXISTS idx_nilai_krs            ON nilai(krs_id);
+        CREATE INDEX IF NOT EXISTS idx_presensi_kelas       ON presensi(kelas_id);
+        CREATE INDEX IF NOT EXISTS idx_presensi_mahasiswa   ON presensi(mahasiswa_id);
+        CREATE INDEX IF NOT EXISTS idx_presensi_tanggal     ON presensi(tanggal);
+        CREATE INDEX IF NOT EXISTS idx_users_role           ON users(role);
+        CREATE INDEX IF NOT EXISTS idx_users_linked         ON users(linked_id);
+        CREATE INDEX IF NOT EXISTS idx_ta_active            ON tahun_akademik(is_active);
     ");
 
     $count = $db->query("SELECT COUNT(*) FROM users")->fetchColumn();
@@ -460,6 +489,29 @@ function hari_opts(?string $sel = null): string {
 
 function title(string $s): string { return ucwords(str_replace('_', ' ', $s)); }
 
+function paginate(int $total, int $per_page = 20): array {
+    $page = max(1, (int)($_GET['pg'] ?? 1));
+    $pages = max(1, (int)ceil($total / $per_page));
+    $page = min($page, $pages);
+    $offset = ($page - 1) * $per_page;
+    return ['page' => $page, 'pages' => $pages, 'offset' => $offset, 'limit' => $per_page, 'total' => $total];
+}
+
+function pagination_nav(array $p, string $base): string {
+    if ($p['pages'] <= 1) return '';
+    $sep = strpos($base, '?') !== false ? '&' : '?';
+    $h = '<nav class="pagination" style="display:flex;gap:0.5rem;align-items:center;margin-top:1rem;flex-wrap:wrap">';
+    $h .= '<span style="color:var(--color-text-secondary);font-size:0.85rem">Halaman ' . $p['page'] . ' / ' . $p['pages'] . ' (' . $p['total'] . ' total)</span>';
+    if ($p['page'] > 1) {
+        $h .= '<a href="' . e($base . $sep . 'pg=' . ($p['page'] - 1)) . '" role="button" class="secondary outline" style="padding:0.25rem 0.75rem">&laquo; Prev</a>';
+    }
+    if ($p['page'] < $p['pages']) {
+        $h .= '<a href="' . e($base . $sep . 'pg=' . ($p['page'] + 1)) . '" role="button" class="secondary outline" style="padding:0.25rem 0.75rem">Next &raquo;</a>';
+    }
+    $h .= '</nav>';
+    return $h;
+}
+
 function layout(string $title, string $content): void {
     $u = current_user();
     $sidebar = '';
@@ -574,7 +626,7 @@ HTML;
 <title>{$title} - SIAKAD</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&family=Space+Grotesk:wght@300;400;700&family=Space+Mono:wght@400&family=Doto:wght@900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/style.css?v={$css_ver}">
 <script>
   // Restore sidebar state early to avoid visual flash/jump
@@ -791,21 +843,27 @@ function handle_login(): string {
         flash_set('error', 'Username atau password salah.');
     }
     ob_start(); ?>
-    <div class="login-hero">
-        <h1><?=e(get_setting('school_name', 'SIAKAD'))?></h1>
-        <p><?=e(get_setting('hero_subtitle', 'Portal akademik untuk mahasiswa dan dosen'))?></p>
-    </div>
-    <div class="login-card">
-        <h1>Login</h1>
-        <p class="login-subtitle">Sistem Informasi Akademik</p>
-        <form method="post">
+    <div class="nothing-login">
+        <div class="nothing-login-primary">
+            <h1 class="nothing-headline"><?=e(get_setting('school_name', 'SIAKAD'))?></h1>
+            <p class="nothing-subheading"><?=e(get_setting('hero_subtitle', 'Portal akademik untuk mahasiswa dan dosen'))?></p>
+        </div>
+        <form method="post" class="nothing-login-form">
+            <div class="nothing-form-group">
+                <label for="username" class="nothing-label">USERNAME</label>
+                <input type="text" id="username" name="username" required autocomplete="username" class="nothing-input">
+            </div>
+            <div class="nothing-form-group">
+                <label for="password" class="nothing-label">PASSWORD</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password" class="nothing-input">
+            </div>
             <?=csrf_field()?>
-            <label for="username">Username</label>
-            <input type="text" id="username" name="username" required autocomplete="username">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required autocomplete="current-password">
-            <button type="submit">Login</button>
+            <button type="submit" class="nothing-button">LOGIN</button>
         </form>
+        <div class="nothing-login-tertiary">
+            <span><?=e(get_setting('footer_email', 'info@example.ac.id'))?></span>
+            <span><?=e(get_setting('footer_copyright', '© 2026 SIAKAD'))?></span>
+        </div>
     </div>
     <?php return ob_get_clean();
 }
@@ -899,7 +957,9 @@ function handle_prodi(): string {
         </form>
         <?php return ob_get_clean();
     }
-    $rows = db()->query("SELECT * FROM prodi ORDER BY kode");
+    $total = db()->query("SELECT COUNT(*) FROM prodi")->fetchColumn();
+    $p = paginate($total);
+    $rows = db()->query("SELECT * FROM prodi ORDER BY kode LIMIT {$p['limit']} OFFSET {$p['offset']}");
     ob_start(); ?>
     <h1>Program Studi</h1>
     <a href="?page=prodi&action=create" role="button" style="float:right">+ Tambah</a>
@@ -907,6 +967,7 @@ function handle_prodi(): string {
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['kode'])?></td><td><?=e($r['nama'])?></td><td><?=e($r['jenjang'])?></td>
     <td><a href="?page=prodi&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="prodi"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
+    <?= pagination_nav($p, '?page=prodi') ?>
     <?php return ob_get_clean();
 }
 
@@ -944,7 +1005,10 @@ function handle_mahasiswa(): string {
         </form>
         <?php return ob_get_clean();
     }
-    $rows = db()->query("SELECT m.*, p.nama AS prodi_nama FROM mahasiswa m LEFT JOIN prodi p ON p.id=m.prodi_id ORDER BY m.nim");
+    $total = db()->query("SELECT m.*, p.nama AS prodi_nama FROM mahasiswa m LEFT JOIN prodi p ON p.id=m.prodi_id")->rowCount();
+    if (!$total) $total = db()->query("SELECT COUNT(*) FROM mahasiswa")->fetchColumn();
+    $p = paginate($total);
+    $rows = db()->query("SELECT m.*, p.nama AS prodi_nama FROM mahasiswa m LEFT JOIN prodi p ON p.id=m.prodi_id ORDER BY m.nim LIMIT {$p['limit']} OFFSET {$p['offset']}");
     ob_start(); ?>
     <h1>Mahasiswa</h1>
     <a href="?page=mahasiswa&action=create" role="button" style="float:right">+ Tambah</a>
@@ -952,6 +1016,7 @@ function handle_mahasiswa(): string {
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['nim'])?></td><td><?=e($r['nama'])?></td><td><?=e($r['prodi_nama']??'')?></td><td><?=e($r['angkatan'])?></td>
     <td><a href="?page=mahasiswa&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="mahasiswa"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
+    <?= pagination_nav($p, '?page=mahasiswa') ?>
     <?php return ob_get_clean();
 }
 
@@ -988,7 +1053,9 @@ function handle_dosen(): string {
         </form>
         <?php return ob_get_clean();
     }
-    $rows = db()->query("SELECT d.*, p.nama AS prodi_nama FROM dosen d LEFT JOIN prodi p ON p.id=d.prodi_id ORDER BY d.nidn");
+    $total = db()->query("SELECT COUNT(*) FROM dosen")->fetchColumn();
+    $p = paginate($total);
+    $rows = db()->query("SELECT d.*, p.nama AS prodi_nama FROM dosen d LEFT JOIN prodi p ON p.id=d.prodi_id ORDER BY d.nidn LIMIT {$p['limit']} OFFSET {$p['offset']}");
     ob_start(); ?>
     <h1>Dosen</h1>
     <a href="?page=dosen&action=create" role="button" style="float:right">+ Tambah</a>
@@ -996,6 +1063,7 @@ function handle_dosen(): string {
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['nidn'])?></td><td><?=e($r['nama'])?></td><td><?=e($r['prodi_nama']??'')?></td>
     <td><a href="?page=dosen&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="dosen"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
+    <?= pagination_nav($p, '?page=dosen') ?>
     <?php return ob_get_clean();
 }
 
@@ -1031,7 +1099,9 @@ function handle_mata_kuliah(): string {
         </form>
         <?php return ob_get_clean();
     }
-    $rows = db()->query("SELECT mk.*, p.nama AS prodi_nama FROM mata_kuliah mk LEFT JOIN prodi p ON p.id=mk.prodi_id ORDER BY mk.kode");
+    $total = db()->query("SELECT COUNT(*) FROM mata_kuliah")->fetchColumn();
+    $p = paginate($total);
+    $rows = db()->query("SELECT mk.*, p.nama AS prodi_nama FROM mata_kuliah mk LEFT JOIN prodi p ON p.id=mk.prodi_id ORDER BY mk.kode LIMIT {$p['limit']} OFFSET {$p['offset']}");
     ob_start(); ?>
     <h1>Mata Kuliah</h1>
     <a href="?page=mata_kuliah&action=create" role="button" style="float:right">+ Tambah</a>
@@ -1039,6 +1109,7 @@ function handle_mata_kuliah(): string {
     <?php foreach ($rows as $r): ?><tr><td><?=e($r['kode'])?></td><td><?=e($r['nama'])?></td><td><?=$r['sks']?></td><td><?=e($r['prodi_nama']??'')?></td><td><?=$r['semester']?></td>
     <td><a href="?page=mata_kuliah&action=edit&id=<?=$r['id']?>">Edit</a> | <form method="get" style="display:inline"><input type="hidden" name="page" value="mata_kuliah"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="<?=$r['id']?>"><input type="hidden" name="csrf" value="<?=csrf_token()?>"><button type="submit" onclick="return confirm('Hapus?')" style="background:none;border:none;color:inherit;text-decoration:underline;padding:0">Hapus</button></form></td></tr>
     <?php endforeach; ?></tbody></table>
+    <?= pagination_nav($p, '?page=mata_kuliah') ?>
     <?php return ob_get_clean();
 }
 
@@ -1079,7 +1150,9 @@ function handle_tahun_akademik(): string {
         </form>
         <?php return ob_get_clean();
     }
-    $rows = db()->query("SELECT * FROM tahun_akademik ORDER BY tahun DESC, semester DESC");
+    $total = db()->query("SELECT COUNT(*) FROM tahun_akademik")->fetchColumn();
+    $p = paginate($total);
+    $rows = db()->query("SELECT * FROM tahun_akademik ORDER BY tahun DESC, semester DESC LIMIT {$p['limit']} OFFSET {$p['offset']}");
     ob_start(); ?>
     <h1>Tahun Akademik</h1>
     <a href="?page=tahun_akademik&action=create" role="button" style="float:right">+ Tambah</a>
@@ -1091,6 +1164,7 @@ function handle_tahun_akademik(): string {
         <?php if (!$r['is_active']): ?> | <form method="post" style="display:inline"><?=csrf_field()?><input type="hidden" name="id" value="<?=$r['id']?>"><button type="submit" name="activate" value="1" class="outline" style="display:inline;width:auto;padding:0 0.5rem">Aktifkan</button></form><?php endif; ?>
     </td></tr>
     <?php endforeach; ?></tbody></table>
+    <?= pagination_nav($p, '?page=tahun_akademik') ?>
     <?php return ob_get_clean();
 }
 
@@ -1349,7 +1423,10 @@ function handle_khs(): string {
     if ($u['role'] === 'mahasiswa') $mhs_id = $u['linked_id'];
 
     $mhs = db()->prepare("SELECT m.*, p.nama AS prodi_nama FROM mahasiswa m LEFT JOIN prodi p ON p.id=m.prodi_id WHERE m.id=?");
-    $mhs->execute([$mhs_id]); $mhs = $mhs->fetch() or die('Mahasiswa tidak ditemukan.');
+    $mhs->execute([$mhs_id]); $mhs = $mhs->fetch();
+    if (!$mhs) {
+        return '<h1>Kartu Hasil Studi (KHS)</h1><article>Data mahasiswa tidak ditemukan.</article>';
+    }
 
     $ta_id = $_GET['ta_id'] ?? db()->query("SELECT id FROM tahun_akademik WHERE is_active=1 LIMIT 1")->fetchColumn();
 
@@ -1681,69 +1758,128 @@ function render_landing_page(): string {
     }
     
     $accent_color = $s['accent_color'] ?? '#2c7a4b';
-    
+    $school = $s['school_name'] ?? 'SIAKAD';
+    $title = $s['hero_title'] ?? 'Selamat Datang di Portal Akademik';
+    $subtitle = $s['hero_subtitle'] ?? 'Portal akademik untuk mahasiswa dan dosen';
+    $copyright = e(str_replace('{school_name}', $school, $s['footer_copyright'] ?? '© 2026 SIAKAD'));
     ob_start(); ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?=e($s['school_name'] ?? 'SIAKAD')?></title>
-    <style>:root { --accent-color: <?=e($accent_color)?>; }</style>
+    <title><?=e($school)?></title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Geist+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;700&family=Space+Mono:wght@400&family=Doto:wght@900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css?v=<?=filemtime(__DIR__.'/assets/css/style.css')?>">
+    <script src="https://cdn.jsdelivr.net/npm/animejs@3.2.1/lib/anime.min.js"></script>
 </head>
-<body class="landing-page">
-    <header class="landing-header">
-        <div class="logo">
-            <img src="<?=e($logo_path)?>" alt="Logo">
-            <span><?=e($s['school_name'] ?? 'SIAKAD')?></span>
+<body class="landing-page nothing">
+    <main class="nothing-hero">
+        <div class="nothing-tertiary nothing-tertiary--top">
+            <span data-anim="fade" data-delay="0"><?=e(strtoupper($school))?></span>
+            <span data-anim="fade" data-delay="50">SIAKAD / V1</span>
+            <span class="nothing-status" data-anim="fade" data-delay="100"><span class="nothing-dot"></span>ONLINE</span>
         </div>
-        <a href="?page=login" class="login-btn">Login</a>
-    </header>
-    
-    <section class="landing-hero">
-        <img src="<?=e($hero_path)?>" alt="Hero Image">
-        <h1><?=e($s['hero_title'] ?? 'Selamat Datang di Portal Akademik')?></h1>
-        <p><?=e($s['hero_subtitle'] ?? 'Portal akademik untuk mahasiswa dan dosen')?></p>
-    </section>
-    
-    <section class="landing-cards">
-        <article class="landing-card">
-            <img src="assets/icons/<?=e($s['card_1_icon'] ?? 'krs')?>.svg" class="card-icon" alt="Icon">
-            <h3><?=e($s['card_1_title'] ?? 'KRS Online')?></h3>
-            <p><?=e($s['card_1_desc'] ?? 'Pengisian Kartu Rencana Studi secara online')?></p>
-        </article>
-        <article class="landing-card">
-            <img src="assets/icons/<?=e($s['card_2_icon'] ?? 'nilai')?>.svg" class="card-icon" alt="Icon">
-            <h3><?=e($s['card_2_title'] ?? 'Nilai & Transkrip')?></h3>
-            <p><?=e($s['card_2_desc'] ?? 'Lihat nilai dan transkrip akademik')?></p>
-        </article>
-        <article class="landing-card">
-            <img src="assets/icons/<?=e($s['card_3_icon'] ?? 'jadwal')?>.svg" class="card-icon" alt="Icon">
-            <h3><?=e($s['card_3_title'] ?? 'Jadwal Kuliah')?></h3>
-            <p><?=e($s['card_3_desc'] ?? 'Akses jadwal perkuliahan mingguan')?></p>
-        </article>
-    </section>
-    
-    <footer class="landing-footer">
-        <div class="footer-content">
-            <div>
-                <h4>Contact</h4>
-                <p><?=e($s['footer_email'] ?? 'info@example.ac.id')?></p>
-                <p><?=e($s['footer_phone'] ?? '(000) 000-0000')?></p>
-            </div>
-            <div>
-                <h4>Address</h4>
-                <p><?=e($s['footer_address'] ?? 'Jl. Pendidikan No. 123, Kota, Indonesia')?></p>
-            </div>
+
+        <div class="nothing-grid">
+            <section class="nothing-primary">
+                <h1 class="nothing-headline" data-anim="reveal" data-delay="200"><?=e($title)?></h1>
+                <p class="nothing-secondary-copy" data-anim="reveal" data-delay="400"><?=e($subtitle)?></p>
+                <a href="?page=login" class="nothing-cta" data-anim="reveal" data-delay="600">
+                    <span class="nothing-cta-label">LOGIN</span>
+                    <span class="nothing-cta-arrow" aria-hidden="true">&rarr;</span>
+                </a>
+            </section>
+
+            <aside class="nothing-aside">
+                <div class="nothing-dot-matrix" aria-hidden="true">
+                    <?php for ($r = 0; $r < 7; $r++): ?>
+                    <div class="nothing-dot-row">
+                        <?php for ($c = 0; $c < 7; $c++): ?>
+                        <span class="nothing-pixel<?= (($r + $c) % 3 === 0) ? ' on' : '' ?>"></span>
+                        <?php endfor; ?>
+                    </div>
+                    <?php endfor; ?>
+                </div>
+                <div class="nothing-counter" data-anim="count" data-target="2026">
+                    <span class="nothing-counter-value">0000</span>
+                    <span class="nothing-counter-label">YEAR</span>
+                </div>
+            </aside>
         </div>
-        <div class="copyright">
-            <?=e(str_replace('{school_name}', $s['school_name'] ?? 'SIAKAD', $s['footer_copyright'] ?? '© 2026 SIAKAD'))?>
+
+        <div class="nothing-tertiary nothing-tertiary--bottom">
+            <span data-anim="fade" data-delay="800"><?=$copyright?></span>
+            <span data-anim="fade" data-delay="850"><?=e($s['footer_email'] ?? 'info@example.ac.id')?></span>
+            <span data-anim="fade" data-delay="900">[<span id="nothing-clock">--:--:--</span>]</span>
         </div>
-    </footer>
+    </main>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Reveal: type-aware, ease-out only (Nothing: §3 anti-bounce)
+        document.querySelectorAll('[data-anim="reveal"]').forEach(function (el) {
+            anime({
+                targets: el,
+                opacity: [0, 1],
+                translateY: [12, 0],
+                easing: 'easeOutQuart',
+                duration: 700,
+                delay: parseInt(el.dataset.delay) || 0
+            });
+        });
+
+        // Tertiary fade — fast, mechanical
+        document.querySelectorAll('[data-anim="fade"]').forEach(function (el) {
+            anime({
+                targets: el,
+                opacity: [0, 1],
+                easing: 'easeOutQuart',
+                duration: 400,
+                delay: parseInt(el.dataset.delay) || 0
+            });
+        });
+
+        // Counter (one moment of surprise — Nothing: §2.6)
+        var counter = document.querySelector('.nothing-counter');
+        if (counter) {
+            var target = parseInt(counter.dataset.target) || 0;
+            var value = counter.querySelector('.nothing-counter-value');
+            var obj = { n: 0 };
+            anime({
+                targets: obj,
+                n: target,
+                round: 1,
+                easing: 'easeOutQuart',
+                duration: 1400,
+                delay: 600,
+                update: function () { value.textContent = String(obj.n).padStart(4, '0'); }
+            });
+        }
+
+        // Dot-matrix percussive activation
+        anime({
+            targets: '.nothing-pixel.on',
+            opacity: [0, 1],
+            easing: 'steps(1)',
+            duration: 80,
+            delay: anime.stagger(40, { start: 300 })
+        });
+
+        // Mechanical clock (Nothing: §2.8 percussive)
+        var clock = document.getElementById('nothing-clock');
+        function tick() {
+            if (!clock) return;
+            var d = new Date();
+            clock.textContent = String(d.getHours()).padStart(2,'0') + ':' +
+                                String(d.getMinutes()).padStart(2,'0') + ':' +
+                                String(d.getSeconds()).padStart(2,'0');
+        }
+        tick(); setInterval(tick, 1000);
+    });
+    </script>
 </body>
 </html>
 <?php
